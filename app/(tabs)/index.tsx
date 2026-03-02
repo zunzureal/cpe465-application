@@ -1,98 +1,132 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import { Link } from 'expo-router';
+import { ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+import { useThemeColor } from '@/hooks/use-theme-color';
+
+const treatmentPrograms = [
+  {
+    id: 'PT-2401',
+    patientName: 'คุณสมชาย ใจดี',
+    doctorName: 'นพ.ธนา วัฒนกิจ',
+    treatmentArea: 'เข่าขวา',
+    angle: '15° - 65°',
+    force: '8 - 12 N',
+    duration: '20 นาที',
+    rounds: '3 รอบ/วัน',
+  },
+  {
+    id: 'PT-2402',
+    patientName: 'คุณอารยา พูนสุข',
+    doctorName: 'พญ.จิราพร ทองแท้',
+    treatmentArea: 'ข้อไหล่ซ้าย',
+    angle: '10° - 90°',
+    force: '6 - 9 N',
+    duration: '15 นาที',
+    rounds: '2 รอบ/วัน',
+  },
+];
 
 export default function HomeScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+  const { width } = useWindowDimensions();
+  const isTablet = width >= 768;
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
+  const borderColor = useThemeColor({}, 'icon');
+
+  return (
+    <ThemedView style={styles.screen}>
+      <ScrollView contentContainerStyle={styles.content}>
+      <ThemedView style={styles.titleContainer}>
+        <ThemedText type="title">โปรแกรมกายภาพบำบัด</ThemedText>
       </ThemedView>
       <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
+        <ThemedText type="subtitle">คิวโปรแกรมจากแพทย์</ThemedText>
         <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
+          หน้านี้ใช้ตรวจสอบโปรแกรมการรักษาที่ส่งจากแพทย์ก่อนเริ่มกับเครื่องกายภาพบำบัด
+          และยืนยันช่วงองศา/แรงที่ต้องใช้
         </ThemedText>
       </ThemedView>
-    </ParallaxScrollView>
+
+      <View style={[styles.contentWrapper, isTablet && styles.contentWrapperTablet]}>
+        <View style={[styles.programGrid, isTablet && styles.programGridTablet]}>
+          {treatmentPrograms.map((program) => (
+            <ThemedView
+              key={program.id}
+              style={[styles.programCard, { borderColor }, isTablet && styles.programCardTablet]}>
+              <ThemedText type="defaultSemiBold">โปรแกรม: {program.id}</ThemedText>
+              <ThemedText>ผู้ป่วย: {program.patientName}</ThemedText>
+              <ThemedText>แพทย์ผู้สั่ง: {program.doctorName}</ThemedText>
+              <ThemedText>ตำแหน่ง: {program.treatmentArea}</ThemedText>
+              <ThemedText>ช่วงองศา: {program.angle}</ThemedText>
+              <ThemedText>แรงที่กำหนด: {program.force}</ThemedText>
+              <ThemedText>ระยะเวลา: {program.duration}</ThemedText>
+              <ThemedText>ความถี่: {program.rounds}</ThemedText>
+            </ThemedView>
+          ))}
+        </View>
+
+        <Link href="/modal" style={[styles.addProgramLink, { borderColor }, isTablet && styles.addProgramLinkTablet]}>
+          <ThemedText type="link">+ รับโปรแกรมใหม่จากแพทย์</ThemedText>
+        </Link>
+      </View>
+      </ScrollView>
+    </ThemedView>
   );
 }
 
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+  },
+  content: {
+    padding: 32,
+    gap: 16,
+  },
   titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+    marginBottom: 8,
   },
   stepContainer: {
     gap: 8,
     marginBottom: 8,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  contentWrapper: {
+    width: '100%',
+  },
+  contentWrapperTablet: {
+    alignSelf: 'center',
+    maxWidth: 980,
+  },
+  programGrid: {
+    width: '100%',
+  },
+  programGridTablet: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  programCard: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    gap: 4,
+    marginBottom: 12,
+  },
+  programCardTablet: {
+    width: '48%',
+    marginBottom: 0,
+  },
+  addProgramLink: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    alignItems: 'center',
+    marginBottom: 16,
+    marginTop: 12,
+  },
+  addProgramLinkTablet: {
+    alignSelf: 'center',
+    width: '60%',
   },
 });
