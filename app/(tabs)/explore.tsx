@@ -1,183 +1,150 @@
-import { useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, useWindowDimensions, View } from 'react-native';
+/**
+ * Settings (ตั้งค่า) – Patient app settings: profile, device, preferences, logout.
+ * Grouped list style (iOS/Android).
+ */
+
+import { useRouter } from 'expo-router';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
 const TEAL = '#0B8FAC';
-const TEAL_LIGHT = '#E8F6FA';
 
-type LabeledInputProps = {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  unit?: string;
-  textColor: string;
-  borderColor: string;
-  inputBg: string;
-  primaryColor: string;
-};
+// Mock
+const MOCK_PATIENT_NAME = 'คุณสมชาย ใจดี';
+const MOCK_PATIENT_ID = 'PID-2401';
+const MOCK_DEVICE_CONNECTED = false;
 
-function LabeledInput({ label, value, onChange, unit, textColor, borderColor, inputBg, primaryColor }: LabeledInputProps) {
-  return (
-    <View style={inputStyles.field}>
-      <Text style={[inputStyles.label, { color: textColor }]}>{label}</Text>
-      <View style={[inputStyles.row, { backgroundColor: inputBg, borderColor }]}>
-        <TextInput
-          value={value}
-          onChangeText={onChange}
-          keyboardType="numeric"
-          style={[inputStyles.input, { color: textColor }]}
-        />
-        {unit && <Text style={[inputStyles.unit, { color: primaryColor }]}>{unit}</Text>}
-      </View>
-    </View>
-  );
-}
-
-const inputStyles = StyleSheet.create({
-  field: { gap: 6 },
-  label: { fontSize: 13, fontWeight: '600', letterSpacing: 0.2 },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    minHeight: 44,
-  },
-  input: { flex: 1, fontSize: 16, fontWeight: '600', paddingVertical: 10 },
-  unit: { fontSize: 14, fontWeight: '700', paddingLeft: 4 },
-});
-
-export default function TabTwoScreen() {
-  const { width } = useWindowDimensions();
-  const isTablet = width >= 768;
+export default function SettingsScreen() {
+  const router = useRouter();
   const isDark = useColorScheme() === 'dark';
 
-  const [angleStart, setAngleStart] = useState('15');
-  const [angleEnd, setAngleEnd] = useState('65');
-  const [forceTarget, setForceTarget] = useState('10');
-  const [durationMinutes, setDurationMinutes] = useState('20');
-  const [autoStop, setAutoStop] = useState(true);
-  const [assistMode, setAssistMode] = useState(true);
-
-  const bg = isDark ? '#0D1117' : '#F0F6FA';
+  const bg = isDark ? '#0D1117' : '#F0F4F8';
   const cardBg = isDark ? '#1C2128' : '#FFFFFF';
   const textPrimary = isDark ? '#E8EDF2' : '#1A2B3C';
-  const textSecondary = isDark ? '#8FA0B0' : '#6B8099';
-  const borderColor = isDark ? '#2D3945' : '#D8E9F0';
-  const inputBg = isDark ? '#0D1117' : '#F7FBFD';
+  const textSecondary = isDark ? '#8FA0B0' : '#6B7280';
+  const borderColor = isDark ? '#2D3945' : '#E5E7EB';
   const primaryColor = isDark ? '#1DD4B3' : TEAL;
-  const primaryLight = isDark ? '#0D2630' : TEAL_LIGHT;
 
-  const handleSave = () => {
-    Alert.alert('บันทึกการตั้งค่า', 'ระบบบันทึกค่าการรักษาเรียบร้อยแล้ว');
+  const handleConnectDevice = () => {
+    // Placeholder: open device pairing
+  };
+
+  const handleUserGuide = () => {
+    // Placeholder: open guide
+  };
+
+  const handleContactSupport = () => {
+    // Placeholder: open contact
+  };
+
+  const handleLogout = () => {
+    router.replace('/(tabs)');
+  };
+
+  const handleManualSetup = () => {
+    router.push('/manual-setup');
   };
 
   return (
     <View style={[styles.screen, { backgroundColor: bg }]}>
-      {/* Header */}
       <View style={[styles.header, { backgroundColor: isDark ? '#0C2535' : TEAL }]}>
-        <Text style={styles.headerTitle}>ตั้งค่าเครื่องกายภาพ</Text>
-        <Text style={styles.headerSubtitle}>Device Configuration</Text>
+        <Text style={styles.headerTitle}>ตั้งค่า</Text>
+        <Text style={styles.headerSubtitle}>Settings</Text>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <Text style={[styles.sectionDesc, { color: textSecondary }]}>
-          กำหนดค่าการรักษาที่จะส่งเข้าเครื่องก่อนเริ่มรอบบำบัด
-        </Text>
-
-        <View style={isTablet ? styles.gridTablet : undefined}>
-          {/* Motion Range Card */}
-          <View style={[styles.card, { backgroundColor: cardBg, borderColor }, isTablet ? styles.halfCard : null]}>
-            <View style={[styles.cardTitleBar, { backgroundColor: primaryLight }]}>
-              <Text style={[styles.cardTitle, { color: primaryColor }]}>ช่วงการเคลื่อนไหว</Text>
-              <Text style={[styles.cardTitleSub, { color: textSecondary }]}>Range of Motion</Text>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Profile Section */}
+        <View style={[styles.card, { backgroundColor: cardBg, borderColor }]}>
+          <View style={styles.profileRow}>
+            <View style={[styles.avatar, { backgroundColor: primaryColor + '25' }]}>
+              <Ionicons name="person" size={40} color={primaryColor} />
             </View>
-            <View style={styles.cardBody}>
-              <LabeledInput label="มุมเริ่มต้น" value={angleStart} onChange={setAngleStart} unit="°"
-                textColor={textPrimary} borderColor={borderColor} inputBg={inputBg} primaryColor={primaryColor} />
-              <LabeledInput label="มุมสิ้นสุด" value={angleEnd} onChange={setAngleEnd} unit="°"
-                textColor={textPrimary} borderColor={borderColor} inputBg={inputBg} primaryColor={primaryColor} />
-            </View>
-          </View>
-
-          {/* Force & Duration Card */}
-          <View style={[styles.card, { backgroundColor: cardBg, borderColor }, isTablet ? styles.halfCard : null]}>
-            <View style={[styles.cardTitleBar, { backgroundColor: primaryLight }]}>
-              <Text style={[styles.cardTitle, { color: primaryColor }]}>แรงและระยะเวลา</Text>
-              <Text style={[styles.cardTitleSub, { color: textSecondary }]}>Force & Duration</Text>
-            </View>
-            <View style={styles.cardBody}>
-              <LabeledInput label="แรงเป้าหมาย" value={forceTarget} onChange={setForceTarget} unit="N"
-                textColor={textPrimary} borderColor={borderColor} inputBg={inputBg} primaryColor={primaryColor} />
-              <LabeledInput label="เวลาต่อรอบ" value={durationMinutes} onChange={setDurationMinutes} unit="นาที"
-                textColor={textPrimary} borderColor={borderColor} inputBg={inputBg} primaryColor={primaryColor} />
-            </View>
-          </View>
-
-          {/* Operation Mode Card */}
-          <View style={[styles.card, { backgroundColor: cardBg, borderColor }, isTablet ? styles.halfCard : null]}>
-            <View style={[styles.cardTitleBar, { backgroundColor: primaryLight }]}>
-              <Text style={[styles.cardTitle, { color: primaryColor }]}>โหมดการทำงาน</Text>
-              <Text style={[styles.cardTitleSub, { color: textSecondary }]}>Operation Mode</Text>
-            </View>
-            <View style={styles.cardBody}>
-              <View style={[styles.toggleRow, { borderBottomColor: borderColor }]}>
-                <View style={styles.toggleInfo}>
-                  <Text style={[styles.toggleLabel, { color: textPrimary }]}>หยุดอัตโนมัติเมื่อเกินค่า</Text>
-                  <Text style={[styles.toggleDesc, { color: textSecondary }]}>Auto-stop on limit exceed</Text>
-                </View>
-                <Switch value={autoStop} onValueChange={setAutoStop}
-                  trackColor={{ false: '#CBD5E0', true: primaryColor }} thumbColor="#FFFFFF" />
-              </View>
-              <View style={styles.toggleRow}>
-                <View style={styles.toggleInfo}>
-                  <Text style={[styles.toggleLabel, { color: textPrimary }]}>โหมดช่วยพยุงการเคลื่อนไหว</Text>
-                  <Text style={[styles.toggleDesc, { color: textSecondary }]}>Assisted motion mode</Text>
-                </View>
-                <Switch value={assistMode} onValueChange={setAssistMode}
-                  trackColor={{ false: '#CBD5E0', true: primaryColor }} thumbColor="#FFFFFF" />
-              </View>
-            </View>
-          </View>
-
-          {/* Summary Card */}
-          <View style={[
-            styles.card,
-            { backgroundColor: isDark ? '#0C2535' : TEAL_LIGHT, borderColor: primaryColor + '50' },
-            isTablet ? styles.halfCard : null,
-          ]}>
-            <View style={styles.summaryHeader}>
-              <Text style={[styles.summaryTitle, { color: primaryColor }]}>สรุปค่าปัจจุบัน</Text>
-              <Text style={[styles.summaryTitleSub, { color: textSecondary }]}>Current Settings Summary</Text>
-            </View>
-            <View style={styles.summaryBody}>
-              {([
-                ['ช่วงองศา', `${angleStart}° – ${angleEnd}°`],
-                ['แรงเป้าหมาย', `${forceTarget} N`],
-                ['เวลาต่อรอบ', `${durationMinutes} นาที`],
-                ['หยุดอัตโนมัติ', autoStop ? 'เปิด' : 'ปิด'],
-                ['โหมดช่วยพยุง', assistMode ? 'เปิด' : 'ปิด'],
-              ] as [string, string][]).map(([label, val], i, arr) => (
-                <View key={label} style={[
-                  styles.summaryRow,
-                  { borderBottomColor: primaryColor + '25' },
-                  i === arr.length - 1 ? styles.summaryRowLast : null,
-                ]}>
-                  <Text style={[styles.summaryLabel, { color: textSecondary }]}>{label}</Text>
-                  <Text style={[styles.summaryValue, { color: primaryColor }]}>{val}</Text>
-                </View>
-              ))}
+            <View style={styles.profileInfo}>
+              <Text style={[styles.patientName, { color: textPrimary }]}>{MOCK_PATIENT_NAME}</Text>
+              <Text style={[styles.patientId, { color: textSecondary }]}>
+                รหัสผู้ป่วย (Patient ID): {MOCK_PATIENT_ID}
+              </Text>
             </View>
           </View>
         </View>
 
-        <Pressable
-          style={[styles.saveButton, { backgroundColor: primaryColor }, isTablet ? styles.saveButtonTablet : null]}
-          onPress={handleSave}>
-          <Text style={styles.saveButtonText}>บันทึกค่าการรักษา</Text>
-        </Pressable>
+        {/* Device Connection */}
+        <View style={[styles.card, { backgroundColor: cardBg, borderColor }]}>
+          <TouchableOpacity
+            style={styles.menuRow}
+            onPress={handleConnectDevice}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="bluetooth" size={24} color={primaryColor} style={styles.menuIcon} />
+            <View style={styles.menuTextWrap}>
+              <Text style={[styles.menuTitle, { color: textPrimary }]}>
+                เชื่อมต่อเครื่องกายภาพ (Connect Device)
+              </Text>
+              <Text style={[styles.menuSub, { color: textSecondary }]}>
+                {MOCK_DEVICE_CONNECTED ? '🟢 เชื่อมต่อแล้ว' : '🔴 ยังไม่เชื่อมต่อ'}
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={22} color={textSecondary} />
+          </TouchableOpacity>
+        </View>
+
+        {/* Manual Session Setup link */}
+        <View style={[styles.card, { backgroundColor: cardBg, borderColor }]}>
+          <TouchableOpacity
+            style={styles.menuRow}
+            onPress={handleManualSetup}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="settings-outline" size={24} color={primaryColor} style={styles.menuIcon} />
+            <Text style={[styles.menuTitle, { color: textPrimary }]}>
+              ตั้งค่าโหมดฝึกอิสระ (Manual Practice Setup)
+            </Text>
+            <Ionicons name="chevron-forward" size={22} color={textSecondary} />
+          </TouchableOpacity>
+        </View>
+
+        {/* App Preferences */}
+        <View style={[styles.card, { backgroundColor: cardBg, borderColor }]}>
+          <TouchableOpacity
+            style={[styles.menuRow, styles.menuRowBorder, { borderBottomColor: borderColor }]}
+            onPress={handleUserGuide}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="book-outline" size={24} color={primaryColor} style={styles.menuIcon} />
+            <Text style={[styles.menuTitle, { color: textPrimary }]}>
+              คู่มือการใช้งาน (User Guide)
+            </Text>
+            <Ionicons name="chevron-forward" size={22} color={textSecondary} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.menuRow}
+            onPress={handleContactSupport}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="chatbubble-ellipses-outline" size={24} color={primaryColor} style={styles.menuIcon} />
+            <Text style={[styles.menuTitle, { color: textPrimary }]}>
+              ติดต่อผู้ดูแล (Contact Doctor/Support)
+            </Text>
+            <Ionicons name="chevron-forward" size={22} color={textSecondary} />
+          </TouchableOpacity>
+        </View>
+
+        {/* Logout */}
+        <TouchableOpacity
+          style={styles.logoutButton}
+          onPress={handleLogout}
+          activeOpacity={0.7}
+        >
+          <Ionicons name="log-out-outline" size={24} color="#EF4444" style={styles.logoutIcon} />
+          <Text style={styles.logoutText}>ออกจากระบบ (Logout)</Text>
+        </TouchableOpacity>
+
+        <View style={styles.bottomSpacer} />
       </ScrollView>
     </View>
   );
@@ -186,117 +153,92 @@ export default function TabTwoScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   header: {
-    paddingTop: 60,
-    paddingBottom: 20,
-    paddingHorizontal: 20,
+    paddingTop: 56,
+    paddingBottom: 24,
+    paddingHorizontal: 24,
   },
   headerTitle: {
-    fontSize: 24,
+    fontSize: 28,
     fontWeight: '700',
     color: '#FFFFFF',
     letterSpacing: 0.3,
   },
   headerSubtitle: {
-    fontSize: 13,
-    color: 'rgba(255,255,255,0.72)',
-    marginTop: 2,
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.85)',
+    marginTop: 4,
   },
   content: {
-    padding: 16,
-    paddingTop: 20,
-    paddingBottom: 32,
-  },
-  sectionDesc: {
-    fontSize: 14,
-    lineHeight: 20,
-    marginBottom: 16,
-  },
-  gridTablet: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
+    padding: 20,
+    paddingBottom: 40,
   },
   card: {
     borderRadius: 16,
-    marginBottom: 12,
+    marginBottom: 16,
     borderWidth: 1,
     overflow: 'hidden',
   },
-  halfCard: {
-    width: '48%',
-    marginBottom: 0,
-  },
-  cardTitleBar: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  cardTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  cardTitleSub: {
-    fontSize: 12,
-    marginTop: 1,
-  },
-  cardBody: {
-    padding: 16,
-    gap: 12,
-  },
-  toggleRow: {
+  profileRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 10,
-    borderBottomWidth: 1,
+    padding: 20,
   },
-  toggleInfo: { flex: 1, paddingRight: 12 },
-  toggleLabel: { fontSize: 14, fontWeight: '600' },
-  toggleDesc: { fontSize: 12, marginTop: 2 },
-  summaryHeader: {
-    paddingHorizontal: 16,
-    paddingTop: 14,
-    paddingBottom: 8,
+  avatar: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 16,
   },
-  summaryTitle: {
-    fontSize: 16,
+  profileInfo: { flex: 1 },
+  patientName: {
+    fontSize: 20,
     fontWeight: '700',
+    marginBottom: 4,
   },
-  summaryTitleSub: {
-    fontSize: 12,
-    marginTop: 1,
+  patientId: {
+    fontSize: 14,
   },
-  summaryBody: {
-    paddingHorizontal: 16,
-    paddingBottom: 8,
-  },
-  summaryRow: {
+  menuRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-  },
-  summaryRowLast: {
-    borderBottomWidth: 0,
-  },
-  summaryLabel: { fontSize: 13, fontWeight: '500' },
-  summaryValue: { fontSize: 14, fontWeight: '700' },
-  saveButton: {
-    borderRadius: 14,
     paddingVertical: 16,
-    alignItems: 'center',
-    marginTop: 8,
+    paddingHorizontal: 16,
   },
-  saveButtonTablet: {
-    width: '50%',
-    alignSelf: 'center',
+  menuRowBorder: {
+    borderBottomWidth: 1,
   },
-  saveButtonText: {
-    color: '#FFFFFF',
+  menuIcon: {
+    marginRight: 14,
+  },
+  menuTextWrap: { flex: 1 },
+  menuTitle: {
     fontSize: 16,
-    fontWeight: '700',
-    letterSpacing: 0.3,
+    fontWeight: '600',
   },
+  menuSub: {
+    fontSize: 13,
+    marginTop: 2,
+  },
+  logoutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 24,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: '#EF4444',
+  },
+  logoutIcon: {
+    marginRight: 10,
+  },
+  logoutText: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#EF4444',
+  },
+  bottomSpacer: { height: 24 },
 });
-
-

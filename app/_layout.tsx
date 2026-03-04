@@ -20,6 +20,9 @@ export default function RootLayout() {
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
         <Stack>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          <Stack.Screen name="doctor" options={{ title: 'ภาพรวมแพทย์', headerShown: true }} />
+          <Stack.Screen name="therapy-session" options={{ title: 'เซสชันกายภาพบำบัด', headerShown: true }} />
+          <Stack.Screen name="manual-setup" options={{ title: 'ตั้งค่าโหมดฝึกอิสระ', headerShown: true }} />
           <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'รับโปรแกรม' }} />
         </Stack>
         <StatusBar style="auto" />
