@@ -452,8 +452,8 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
           </View>
 
           <TouchableOpacity activeOpacity={0.7} style={[styles.startButton, { backgroundColor: theme.primary }]} onPress={handleStartSession}>
-            <Text style={styles.buttonLabel}>▶️ เริ่มการรักษา</Text>
             <Ionicons name="play" size={24} color="#FFFFFF" />
+            <Text style={styles.buttonLabel}>เริ่มการรักษา</Text>
           </TouchableOpacity>
         </ScrollView>
       </SafeAreaView>
@@ -612,9 +612,10 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
               </Text>
             </View>
           ) : (
-            <View style={styles.statusBadgeSuccess}>
+            <View style={[styles.statusBadgeSuccess, styles.statusBadgeRow]}>
+              <Ionicons name="checkmark-circle" size={20} color="#10B981" style={styles.statusBadgeIcon} />
               <Text style={styles.statusBadgeSuccessText}>
-                ✅ ทำตามแผนคุณหมอ (Doctor's Plan)
+                ทำตามแผนคุณหมอ (Doctor's Plan)
               </Text>
             </View>
           )}
@@ -739,16 +740,16 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
           style={isPaused ? styles.resumeButton : styles.pauseButton}
           onPress={handlePause}
         >
-          <Ionicons name={isPaused ? 'play' : 'pause'} size={24} color="#FFFFFF" />
+          <Ionicons name={isPaused ? 'play' : 'pause'} size={40} color="#FFFFFF" />
           <Text style={styles.buttonLabel}>
-            {isPaused ? '▶️ ทำต่อ (Resume)' : '⏸️ หยุดชั่วคราว'}
+            {isPaused ? 'ทำต่อ (Resume)' : 'หยุดชั่วคราว'}
           </Text>
         </TouchableOpacity>
 
         {/* Emergency Stop */}
         <TouchableOpacity activeOpacity={0.7} style={styles.emergencyStopButton} onPress={handleEmergencyStop}>
           <Ionicons name="stop-circle" size={40} color="#FFFFFF" />
-          <Text style={styles.buttonLabel}>🛑 หยุดฉุกเฉิน</Text>
+          <Text style={styles.buttonLabel}>หยุดฉุกเฉิน</Text>
         </TouchableOpacity>
 
         <View style={styles.bottomSpacer} />
@@ -1096,6 +1097,14 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     borderColor: '#10B981',
+  },
+  statusBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  statusBadgeIcon: {
+    marginRight: 8,
   },
   statusBadgeSuccessText: {
     fontSize: 16,

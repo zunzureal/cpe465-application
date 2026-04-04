@@ -8,17 +8,20 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-nati
 import { Ionicons } from '@expo/vector-icons';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useMockDevice } from '@/hooks/useMockDevice';
+import { useAuth } from '@/contexts/AuthContext';
 
 const TEAL = '#0B8FAC';
 
 // Mock
 const MOCK_PATIENT_NAME = 'คุณสมชาย ใจดี';
 const MOCK_PATIENT_ID = 'PID-2401';
-const MOCK_DEVICE_CONNECTED = false;
 
 export default function SettingsScreen() {
   const router = useRouter();
   const isDark = useColorScheme() === 'dark';
+  const mock = useMockDevice();
+  const auth = useAuth();
 
   const bg = isDark ? '#0D1117' : '#F0F4F8';
   const cardBg = isDark ? '#1C2128' : '#FFFFFF';
@@ -27,8 +30,17 @@ export default function SettingsScreen() {
   const borderColor = isDark ? '#2D3945' : '#E5E7EB';
   const primaryColor = isDark ? '#1DD4B3' : TEAL;
 
+  const deviceConnected = mock.connectionStatus === 'connected';
+  const deviceStatusText =
+    mock.connectionStatus === 'connected'
+      ? '🟢 เชื่อมต่อแล้ว'
+      : mock.connectionStatus === 'connecting'
+        ? '🟡 กำลังเชื่อมต่อ...'
+        : '🔴 ยังไม่เชื่อมต่อ';
+
   const handleConnectDevice = () => {
-    // Placeholder: open device pairing
+    if (deviceConnected) mock.disconnectDevice();
+    else mock.connectDevice();
   };
 
   const handleUserGuide = () => {
@@ -39,8 +51,8 @@ export default function SettingsScreen() {
     // Placeholder: open contact
   };
 
-  const handleLogout = () => {
-    router.replace('/(tabs)');
+  const handleLogout = async () => {
+    await auth.logout();
   };
 
   const handleManualSetup = () => {
@@ -86,11 +98,44 @@ export default function SettingsScreen() {
                 เชื่อมต่อเครื่องกายภาพ (Connect Device)
               </Text>
               <Text style={[styles.menuSub, { color: textSecondary }]}>
-                {MOCK_DEVICE_CONNECTED ? '🟢 เชื่อมต่อแล้ว' : '🔴 ยังไม่เชื่อมต่อ'}
+                {deviceStatusText}
               </Text>
             </View>
             <Ionicons name="chevron-forward" size={22} color={textSecondary} />
           </TouchableOpacity>
+        </View>
+
+        {/* [Dev] Mock Device Toggle – for testing without physical machine */}
+        <View style={[styles.card, { backgroundColor: cardBg, borderColor }]}>
+          <View style={styles.devSection}>
+            <Text style={[styles.devLabel, { color: textSecondary }]}>
+              Developer: simulate device connection and telemetry
+            </Text>
+            <TouchableOpacity
+              style={[
+                styles.devButton,
+                {
+                  backgroundColor: deviceConnected ? '#6B7280' : primaryColor,
+                },
+              ]}
+              onPress={handleConnectDevice}
+              activeOpacity={0.7}
+              disabled={mock.connectionStatus === 'connecting'}
+            >
+              <Text style={styles.devButtonText}>
+                {mock.connectionStatus === 'connecting'
+                  ? '⏳ กำลังเชื่อมต่อ...'
+                  : deviceConnected
+                    ? '🔌 [Dev] Disconnect Mock Device'
+                    : '🔌 [Dev] Connect to Mock Device'}
+              </Text>
+            </TouchableOpacity>
+            {deviceConnected && (
+              <Text style={[styles.devHint, { color: textSecondary }]}>
+                Current angle: {mock.currentAngle}° (updates during active session)
+              </Text>
+            )}
+          </View>
         </View>
 
         {/* Manual Session Setup link */}
@@ -234,6 +279,28 @@ const styles = StyleSheet.create({
   },
   logoutIcon: {
     marginRight: 10,
+  },
+  devSection: {
+    padding: 16,
+  },
+  devLabel: {
+    fontSize: 13,
+    marginBottom: 10,
+  },
+  devButton: {
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  devButtonText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  devHint: {
+    fontSize: 12,
+    marginTop: 8,
   },
   logoutText: {
     fontSize: 17,

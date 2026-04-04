@@ -45,10 +45,11 @@ const MOCK = {
     { day: 'ส', label: 'เสาร์', completed: false },
     { day: 'อา', label: 'อาทิตย์', completed: false },
   ],
-  nextAppointment: {
+  nextEvaluation: {
     date: 'พรุ่งนี้',
     time: '10:00 น.',
     doctor: 'พญ.จิราพร ทองแท้',
+    description: 'จะเข้ามาตรวจสอบข้อมูลการทำกายภาพของคุณ เพื่อปรับแผนการรักษา',
   },
 };
 
@@ -113,19 +114,6 @@ export function PatientHomeDashboard() {
           </View>
         </Pressable>
 
-        <Pressable
-          style={({ pressed }) => [
-            styles.manualPracticeButton,
-            DSShadowSoft,
-            pressed && styles.manualPracticeButtonPressed,
-          ]}
-          onPress={() => router.push('/manual-setup')}
-        >
-          <Ionicons name="create-outline" size={24} color={DSColors.primary} />
-          <Text style={styles.manualPracticeButtonText}>โหมดฝึกอิสระ (Manual Practice)</Text>
-          <Ionicons name="chevron-forward" size={20} color={DSColors.primary} />
-        </Pressable>
-
         {/* Weekly progress – checkmarks for completed days */}
         <View style={[styles.card, DSShadow]}>
           <Text style={styles.cardTitle}>ความคืบหน้าระยะสัปดาห์</Text>
@@ -159,21 +147,23 @@ export function PatientHomeDashboard() {
           </View>
         </View>
 
-        {/* Next appointment – compact */}
+        {/* Next evaluation – asynchronous review (no live call) */}
         <View style={[styles.card, styles.appointmentCard, DSShadow]}>
           <View style={styles.appointmentHeader}>
             <Ionicons name="calendar" size={DSLayout.iconSize} color={DSColors.primary} />
-            <Text style={styles.cardTitle}>นัดครั้งถัดไป</Text>
+            <Text style={styles.cardTitle}>รอบการประเมินผลถัดไป (Next Evaluation)</Text>
           </View>
           <Text style={styles.appointmentWhen}>
-            {MOCK.nextAppointment.date} · {MOCK.nextAppointment.time}
+            {MOCK.nextEvaluation.date} • {MOCK.nextEvaluation.time}
           </Text>
-          <Text style={styles.appointmentDoctor}>{MOCK.nextAppointment.doctor}</Text>
+          <Text style={styles.appointmentDoctor}>
+            {MOCK.nextEvaluation.doctor} {MOCK.nextEvaluation.description}
+          </Text>
           <Pressable
             style={({ pressed }) => [styles.primaryButton, pressed && styles.primaryButtonPressed]}
             onPress={() => router.push('/(tabs)/programs')}
           >
-            <Text style={styles.primaryButtonText}>ดูโปรแกรมการรักษา</Text>
+            <Text style={styles.cardTitle}>📊 ดูกราฟพัฒนาการของฉัน</Text>
             <Ionicons name="chevron-forward" size={20} color={DSColors.text.inverse} />
           </Pressable>
         </View>
@@ -327,7 +317,8 @@ const styles = StyleSheet.create({
     backgroundColor: DSColors.surface,
     borderRadius: DSShape.radiusCard,
     padding: DSLayout.cardPadding,
-    marginBottom: DSLayout.itemGap,
+    marginBottom: 8,
+    marginTop: 8,
   },
   cardTitle: {
     ...DSTypography.h3,
@@ -336,8 +327,7 @@ const styles = StyleSheet.create({
   cardSubtitle: {
     ...DSTypography.caption,
     color: DSColors.text.secondary,
-    marginTop: 4,
-    marginBottom: 16,
+    marginBottom: 12,
   },
   weekRow: {
     flexDirection: 'row',

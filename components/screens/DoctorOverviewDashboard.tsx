@@ -7,7 +7,6 @@ import { useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import {
   FlatList,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -256,7 +255,6 @@ const styles = StyleSheet.create({
     ...DSTypography.body,
     color: DSColors.text.primary,
     paddingVertical: 0,
-    ...Platform.select({ web: { outlineStyle: 'none' } }),
   },
   listCard: {
     flex: 1,
