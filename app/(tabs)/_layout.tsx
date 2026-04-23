@@ -43,14 +43,21 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'โปรแกรม',
+          title: 'หน้าหลัก',
+          tabBarIcon: ({ color }) => <IconSymbol size={26} name="house.fill" color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="programs"
+        options={{
+          title: 'ประวัติ',
           tabBarIcon: ({ color }) => <IconSymbol size={26} name="clipboard.fill" color={color} />,
         }}
       />
       <Tabs.Screen
         name="explore"
         options={{
-          title: 'ตั้งค่าเครื่อง',
+          title: 'ตั้งค่า',
           tabBarIcon: ({ color }) => <IconSymbol size={26} name="gearshape.fill" color={color} />,
         }}
       />
