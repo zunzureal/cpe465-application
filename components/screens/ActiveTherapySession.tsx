@@ -22,9 +22,14 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-// ─── API config: replace [YOUR_IP_ADDRESS] with your machine's local IP (e.g. 192.168.1.100) ───
-const API_BASE = 'http://[YOUR_IP_ADDRESS]:5000';
-const MOCK_PATIENT_ID = 'patient1';
+// ─── API config ───────────────────────────────────────────────────────────
+// Priority:
+// 1) EXPO_PUBLIC_API_BASE_URL (recommended; supports real device + any env)
+// 2) Platform defaults for local development
+const API_BASE =
+  process.env.EXPO_PUBLIC_API_BASE_URL?.replace(/\/$/, '') ||
+  (Platform.OS === 'android' ? 'http://10.0.2.2:8080' : 'http://localhost:8080');
+const MOCK_PATIENT_ID = 1;
 
 // ─── Types ───────────────────────────────────────────────────────────────
 type SessionState = 'PREPARATION' | 'RUNNING' | 'PAUSED' | 'FINISHED';
@@ -39,6 +44,16 @@ export interface DoctorPresets {
   useWarmUp: boolean;
   /** Resistance force threshold in Newtons (N) – safety limit from doctor. */
   targetForceN: number;
+}
+
+interface TreatmentPlanApiResponse {
+  id: number;
+  targetFlexion: number;
+  targetExtension: number;
+  speedLevel: number;
+  durationMinutes: number;
+  useWarmup: boolean;
+  targetForceN?: number | null;
 }
 
 /** Alias for treatment/machine preset from API (used by API layer). */
@@ -97,6 +112,7 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
 
   // Presets: Doctor mode from API; Manual mode uses MANUAL_DEFAULTS.
   const [doctorPresets, setDoctorPresets] = useState<DoctorPresets | null>(null);
+  const [activePlanId, setActivePlanId] = useState<number | null>(null);
   const [loadingPresets, setLoadingPresets] = useState(!isManualMode);
   const [presetError, setPresetError] = useState<string | null>(null);
 
@@ -134,6 +150,7 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
   useEffect(() => {
     if (isManualMode) {
       setDoctorPresets(null);
+      setActivePlanId(null);
       setTargetFlexion(MANUAL_DEFAULTS.flexionDegree);
       setTargetExtension(MANUAL_DEFAULTS.extensionDegree);
       setTargetSpeed(MANUAL_DEFAULTS.speed);
@@ -152,13 +169,18 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
       })
-      .then((data: DoctorPresets) => {
+      .then((data: TreatmentPlanApiResponse) => {
         if (cancelled) return;
         const presetsFromApi = {
           ...DEFAULT_PRESETS,
-          ...data,
-          targetForceN: typeof (data as DoctorPresets).targetForceN === 'number' ? (data as DoctorPresets).targetForceN : DEFAULT_PRESETS.targetForceN,
+          flexionDegree: Number(data.targetFlexion ?? DEFAULT_PRESETS.flexionDegree),
+          extensionDegree: Number(data.targetExtension ?? DEFAULT_PRESETS.extensionDegree),
+          speed: Number(data.speedLevel ?? DEFAULT_PRESETS.speed),
+          durationMinutes: Number(data.durationMinutes ?? DEFAULT_PRESETS.durationMinutes),
+          useWarmUp: Boolean(data.useWarmup ?? DEFAULT_PRESETS.useWarmUp),
+          targetForceN: typeof data.targetForceN === 'number' ? data.targetForceN : DEFAULT_PRESETS.targetForceN,
         };
+        setActivePlanId(Number(data.id));
         setDoctorPresets(presetsFromApi);
         setTargetFlexion(presetsFromApi.flexionDegree);
         setTargetExtension(presetsFromApi.extensionDegree);
@@ -170,6 +192,7 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
       .catch((err: Error) => {
         if (cancelled) return;
         setPresetError(err.message ?? 'Failed to load presets');
+        setActivePlanId(null);
         setDoctorPresets(DEFAULT_PRESETS);
         Alert.alert(
           'ไม่สามารถโหลดแผนการรักษา',
@@ -339,17 +362,27 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
 
   const submitSessionResults = useCallback(async () => {
     if (painLevel === null) return;
+    if (!activePlanId) {
+      setPostResultStatus('error');
+      Alert.alert(
+        'ส่งผลไม่สำเร็จ',
+        'ไม่พบแผนการรักษาที่ใช้งานอยู่สำหรับผู้ป่วยนี้ กรุณาโหลดแผนใหม่อีกครั้ง',
+        [{ text: 'ตกลง' }]
+      );
+      return;
+    }
     setPostResultStatus('pending');
     const completed = timeCompletedRef.current;
     const actualMaxFlexion = maxFlexionRef.current;
     const actualMaxForceN = actualMaxForceNRef.current;
     const payload = {
       patientId: MOCK_PATIENT_ID,
-      date: new Date().toISOString(),
+      planId: activePlanId,
+      sessionDate: new Date().toISOString(),
       actualMaxFlexion,
-      timeCompleted: completed,
+      durationCompleted: completed,
       painLevel,
-      isCustomSettings,
+      isCustomUsed: isCustomSettings,
       actualMaxForceN,
     };
     try {
@@ -369,7 +402,7 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
         [{ text: 'ตกลง' }]
       );
     }
-  }, [painLevel, isCustomSettings]);
+  }, [painLevel, isCustomSettings, activePlanId]);
 
   // ─── Loading presets ───────────────────────────────────────────────────
   if (loadingPresets) {
