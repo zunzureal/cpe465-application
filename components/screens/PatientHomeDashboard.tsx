@@ -1,57 +1,216 @@
 /**
  * Patient Home Dashboard – Friendly, Accessible & Modern
- * Greeting, large "Start Today's Session" card (target degrees & time), weekly checkmarks.
+ * Greeting, large "Start Today's Session" card, monthly therapy calendar.
  */
 
-import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+import { useState } from 'react';
 import {
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
   DSColors,
   DSLayout,
   DSShadow,
-  DSShadowSoft,
   DSShape,
   DSTypography,
 } from '@/constants/design-system';
 
-// ─── Mock data ───────────────────────────────────────────────────────────
+const IMG_KNEE = require('@/assets/images/knee-brace.png');
+const IMG_CLOCK = require('@/assets/images/clock.png');
+const IMG_ANGLE = require('@/assets/images/angle.png');
+
+// ─── Mock data ───────────────────────────────────────────────────────────────
 const MOCK = {
-  patientName: 'คุณสมชาย',
-  greeting: 'สวัสดีครับ',
   todaySession: {
     targetDegrees: '15° – 65°',
     targetTimeMinutes: 20,
     area: 'เข่าขวา',
   },
-  doctorPlan: {
-    programId: 'PT-2401',
-    durationMinutes: 20,
-  },
-  weeklyProgress: [
-    { day: 'จ', label: 'จันทร์', completed: true },
-    { day: 'อ', label: 'อังคาร', completed: true },
-    { day: 'พ', label: 'พุธ', completed: true },
-    { day: 'พฤ', label: 'พฤหัส', completed: false },
-    { day: 'ศ', label: 'ศุกร์', completed: false },
-    { day: 'ส', label: 'เสาร์', completed: false },
-    { day: 'อา', label: 'อาทิตย์', completed: false },
+  // Dates the patient completed therapy (YYYY-MM-DD format)
+  completedDates: [
+    '2026-04-01', '2026-04-03', '2026-04-05', '2026-04-07', '2026-04-09', '2026-04-11',
+    '2026-04-08', '2026-04-10', '2026-04-12', '2026-04-14',
+    '2026-04-15', '2026-04-17', '2026-04-19', '2026-04-21',
+    '2026-04-22', '2026-04-24', '2026-04-26', '2026-04-28',
+    '2026-05-01',
   ],
-  nextEvaluation: {
-    date: 'พรุ่งนี้',
-    time: '10:00 น.',
-    doctor: 'พญ.จิราพร ทองแท้',
-    description: 'จะเข้ามาตรวจสอบข้อมูลการทำกายภาพของคุณ เพื่อปรับแผนการรักษา',
-  },
 };
+
+// ─── Calendar widget ──────────────────────────────────────────────────────────
+
+const THAI_MONTHS = [
+  'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน',
+  'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม',
+  'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม',
+];
+const DAY_HEADERS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
+
+
+interface CalendarWidgetProps {
+  completedDates: string[];
+}
+
+function CalendarWidget({ completedDates }: CalendarWidgetProps) {
+  const today = new Date();
+  const [display, setDisplay] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
+
+  const year = display.getFullYear();
+  const month = display.getMonth();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const firstDayOfWeek = new Date(year, month, 1).getDay(); // 0=Sun
+
+  const dateKey = (d: number) =>
+    `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+
+  const completedSet = new Set(completedDates);
+  const isCompleted = (d: number) => completedSet.has(dateKey(d));
+  const isToday = (d: number) =>
+    today.getFullYear() === year && today.getMonth() === month && today.getDate() === d;
+  const isFuture = (d: number) => new Date(year, month, d) > today;
+
+  // Count completed days this month
+  const completedThisMonth = Array.from({ length: daysInMonth }, (_, i) => i + 1)
+    .filter(d => isCompleted(d)).length;
+
+  // Build rows of exactly 7 — pad trailing cells so last row is full
+  const flatCells: (number | null)[] = [
+    ...Array(firstDayOfWeek).fill(null),
+    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+  ];
+  while (flatCells.length % 7 !== 0) flatCells.push(null);
+
+  const rows: (number | null)[][] = [];
+  for (let i = 0; i < flatCells.length; i += 7) {
+    rows.push(flatCells.slice(i, i + 7));
+  }
+
+  const prevMonth = () => setDisplay(new Date(year, month - 1, 1));
+  const nextMonth = () => setDisplay(new Date(year, month + 1, 1));
+
+  // Streak bars rendered at ROW level — single View from center-to-center, no cell boundary gap
+  const CELL_PCT = 100 / 7;
+
+  const renderDay = (d: number | null, colIdx: number) => {
+    if (!d) return <View key={`e-${colIdx}`} style={calStyles.cell} />;
+
+    const done = isCompleted(d);
+    const todayFlag = isToday(d);
+    const future = isFuture(d);
+    const isSunday = colIdx === 0;
+
+    return (
+      <View key={d} style={calStyles.cell}>
+        <View style={[
+          calStyles.dayCircle,
+          done && calStyles.dayDone,
+          todayFlag && !done && calStyles.dayToday,
+          todayFlag && done && calStyles.dayDoneToday,
+        ]}>
+          {done ? (
+            <Text style={[calStyles.dayNum, calStyles.dayNumWhite]}>{d}</Text>
+          ) : (
+            <Text style={[
+              calStyles.dayNum,
+              todayFlag && calStyles.dayNumToday,
+              future && !todayFlag && calStyles.dayNumFuture,
+              isSunday && !todayFlag && calStyles.dayNumSunday,
+            ]}>
+              {d}
+            </Text>
+          )}
+        </View>
+      </View>
+    );
+  };
+
+  const renderRow = (row: (number | null)[], rowIdx: number) => {
+    // Compute streak bars spanning center-of-cell[col] → center-of-cell[col+1]
+    const streakBars = row.slice(0, 6).flatMap((d, col) => {
+      const dNext = row[col + 1];
+      if (!d || !dNext || !isCompleted(d) || !isCompleted(dNext)) return [];
+      const leftPct  = (col + 0.5) * CELL_PCT;
+      const rightPct = (6 - col - 0.5) * CELL_PCT;
+      return [
+        <View
+          key={`streak-${rowIdx}-${col}`}
+          style={[calStyles.streakBar, {
+            left: `${leftPct}%` as unknown as number,
+            right: `${rightPct}%` as unknown as number,
+          }]}
+        />,
+      ];
+    });
+
+    return (
+      <View key={rowIdx} style={calStyles.gridRow}>
+        {streakBars}
+        {row.map((d, colIdx) => renderDay(d, colIdx))}
+      </View>
+    );
+  };
+
+  return (
+    <View>
+      {/* Month navigation */}
+      <View style={calStyles.navRow}>
+        <Pressable onPress={prevMonth} hitSlop={8} style={calStyles.navBtn}
+          accessibilityLabel="เดือนก่อนหน้า">
+          <Ionicons name="chevron-back" size={22} color={DSColors.primary} />
+        </Pressable>
+        <View style={calStyles.navCenter}>
+          <Text style={calStyles.monthTitle}>
+            {THAI_MONTHS[month]} {year + 543}
+          </Text>
+          <Text style={calStyles.completedCount}>
+            ทำแล้ว {completedThisMonth} / {daysInMonth} วัน
+          </Text>
+        </View>
+        <Pressable onPress={nextMonth} hitSlop={8} style={calStyles.navBtn}
+          accessibilityLabel="เดือนถัดไป">
+          <Ionicons name="chevron-forward" size={22} color={DSColors.primary} />
+        </Pressable>
+      </View>
+
+      {/* Day-of-week headers */}
+      <View style={calStyles.headerRow}>
+        {DAY_HEADERS.map((h) => (
+          <Text key={h} style={[calStyles.headerCell, h === 'อา' && calStyles.sundayHeader]}>
+            {h}
+          </Text>
+        ))}
+      </View>
+
+      {/* Rows */}
+      {rows.map((row, rowIdx) => renderRow(row, rowIdx))}
+
+      {/* Legend */}
+      <View style={calStyles.legend}>
+        <View style={calStyles.legendItem}>
+          <View style={[calStyles.legendDot, { backgroundColor: DSColors.success }]} />
+          <Text style={calStyles.legendText}>ทำแล้ว</Text>
+        </View>
+        <View style={calStyles.legendItem}>
+          <View style={[calStyles.legendDot, {
+            borderWidth: 2.5, borderColor: DSColors.primary, backgroundColor: 'transparent'
+          }]} />
+          <Text style={calStyles.legendText}>วันนี้</Text>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+// ─── Main screen ─────────────────────────────────────────────────────────────
 
 export function PatientHomeDashboard() {
   const router = useRouter();
@@ -64,18 +223,7 @@ export function PatientHomeDashboard() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Friendly greeting */}
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.greeting}>{MOCK.greeting}</Text>
-            <Text style={styles.patientName}>{MOCK.patientName}</Text>
-          </View>
-          <View style={[styles.avatar, DSShadowSoft]}>
-            <Ionicons name="person" size={DSLayout.iconSizeLarge} color={DSColors.primary} />
-          </View>
-        </View>
-
-        {/* Large "Start Today's Session" card – target degrees & time */}
+        {/* Start session card */}
         <Pressable
           style={({ pressed }) => [
             styles.startSessionCard,
@@ -93,79 +241,38 @@ export function PatientHomeDashboard() {
               กดเพื่อเริ่มกายภาพบำบัดตามโปรแกรมของคุณหมอ
             </Text>
           </View>
+
           <View style={styles.startSessionParams}>
             <View style={styles.paramBlock}>
-              <Text style={styles.paramLabel}>ช่วงองศาเป้าหมาย</Text>
+              <Image source={IMG_KNEE} style={styles.paramIcon} resizeMode="contain" />
+              <Text style={styles.paramLabel}>บริเวณ</Text>
+              <Text style={styles.paramValue}>{MOCK.todaySession.area}</Text>
+            </View>
+            <View style={styles.paramDivider} />
+            <View style={styles.paramBlock}>
+              <Image source={IMG_ANGLE} style={styles.paramIcon} resizeMode="contain" />
+              <Text style={styles.paramLabel}>ช่วงองศา</Text>
               <Text style={styles.paramValue}>{MOCK.todaySession.targetDegrees}</Text>
             </View>
             <View style={styles.paramDivider} />
             <View style={styles.paramBlock}>
+              <Image source={IMG_CLOCK} style={styles.paramIcon} resizeMode="contain" />
               <Text style={styles.paramLabel}>ระยะเวลา</Text>
               <Text style={styles.paramValue}>{MOCK.todaySession.targetTimeMinutes} นาที</Text>
             </View>
           </View>
-          <View style={styles.areaChip}>
-            <Ionicons name="body" size={18} color={DSColors.primary} />
-            <Text style={styles.areaChipText}>{MOCK.todaySession.area}</Text>
-          </View>
+
           <View style={styles.startSessionCta}>
             <Text style={styles.startSessionCtaText}>เริ่มเซสชัน</Text>
             <Ionicons name="chevron-forward" size={22} color={DSColors.text.inverse} />
           </View>
         </Pressable>
 
-        {/* Weekly progress – checkmarks for completed days */}
+        {/* Calendar progress card */}
         <View style={[styles.card, DSShadow]}>
-          <Text style={styles.cardTitle}>ความคืบหน้าระยะสัปดาห์</Text>
-          <Text style={styles.cardSubtitle}>วันไหนทำครบแล้วจะมีเครื่องหมายถูก</Text>
-          <View style={styles.weekRow}>
-            {MOCK.weeklyProgress.map((d) => (
-              <View key={d.label} style={styles.dayColumn}>
-                <View
-                  style={[
-                    styles.dayCircle,
-                    d.completed ? styles.dayCircleDone : styles.dayCirclePending,
-                  ]}
-                >
-                  {d.completed ? (
-                    <Ionicons name="checkmark" size={22} color={DSColors.text.inverse} />
-                  ) : (
-                    <Text style={styles.dayLetter}>{d.day}</Text>
-                  )}
-                </View>
-                <Text
-                  style={[
-                    styles.dayLabel,
-                    d.completed && styles.dayLabelDone,
-                  ]}
-                  numberOfLines={1}
-                >
-                  {d.label}
-                </Text>
-              </View>
-            ))}
-          </View>
-        </View>
-
-        {/* Next evaluation – asynchronous review (no live call) */}
-        <View style={[styles.card, styles.appointmentCard, DSShadow]}>
-          <View style={styles.appointmentHeader}>
-            <Ionicons name="calendar" size={DSLayout.iconSize} color={DSColors.primary} />
-            <Text style={styles.cardTitle}>รอบการประเมินผลถัดไป (Next Evaluation)</Text>
-          </View>
-          <Text style={styles.appointmentWhen}>
-            {MOCK.nextEvaluation.date} • {MOCK.nextEvaluation.time}
-          </Text>
-          <Text style={styles.appointmentDoctor}>
-            {MOCK.nextEvaluation.doctor} {MOCK.nextEvaluation.description}
-          </Text>
-          <Pressable
-            style={({ pressed }) => [styles.primaryButton, pressed && styles.primaryButtonPressed]}
-            onPress={() => router.push('/(tabs)/programs')}
-          >
-            <Text style={styles.cardTitle}>📊 ดูกราฟพัฒนาการของฉัน</Text>
-            <Ionicons name="chevron-forward" size={20} color={DSColors.text.inverse} />
-          </Pressable>
+          <Text style={styles.cardTitle}>ความคืบหน้าการทำกายภาพ</Text>
+          <Text style={styles.cardSubtitle}>ปฏิทินแสดงวันที่ทำกายภาพเรียบร้อยแล้ว</Text>
+          <CalendarWidget completedDates={MOCK.completedDates} />
         </View>
 
         <View style={styles.bottomSpacer} />
@@ -173,6 +280,142 @@ export function PatientHomeDashboard() {
     </SafeAreaView>
   );
 }
+
+// ─── Calendar styles ──────────────────────────────────────────────────────────
+
+const calStyles = StyleSheet.create({
+  navRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  navBtn: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 18,
+    backgroundColor: DSColors.primaryLight,
+  },
+  navCenter: {
+    alignItems: 'center',
+  },
+  monthTitle: {
+    ...DSTypography.h3,
+    color: DSColors.secondary,
+  },
+  completedCount: {
+    ...DSTypography.caption,
+    color: DSColors.primary,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    marginBottom: 0,
+  },
+  headerCell: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 16,
+    fontWeight: '700',
+    color: DSColors.text.secondary,
+    paddingVertical: 2,
+  },
+  sundayHeader: {
+    color: DSColors.danger,
+  },
+  gridRow: {
+    flexDirection: 'row',
+    overflow: 'hidden',
+    marginVertical: 3,
+  },
+  cell: {
+    flex: 1,
+    height: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 2,
+    overflow: 'visible',
+  },
+  // Single streak bar spanning exactly from center of one cell to center of adjacent cell
+  streakBar: {
+    position: 'absolute',
+    top: '38%',
+    bottom: '38%',
+    backgroundColor: DSColors.success,
+    zIndex: 0,
+  },
+  // Default: no background — pill shape (rounded rectangle)
+  dayCircle: {
+    width: '80%' as unknown as number,
+    height: 32,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1,
+  },
+  dayDone: {
+    backgroundColor: DSColors.success,
+  },
+  // Today not done: outlined circle, red border + red number
+  dayToday: {
+    borderWidth: 2.5,
+    borderColor: DSColors.primary,
+  },
+  // Today done: green fill + red border ring
+  dayDoneToday: {
+    backgroundColor: DSColors.success,
+    borderWidth: 2.5,
+    borderColor: DSColors.primary,
+  },
+  dayNum: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: DSColors.secondary,
+  },
+  dayNumWhite: {
+    color: DSColors.text.inverse,
+  },
+  dayNumToday: {
+    color: DSColors.primary,
+    fontWeight: '800',
+  },
+  dayNumFuture: {
+    color: DSColors.text.secondary,
+    opacity: 0.3,
+    fontWeight: '400',
+  },
+  dayNumSunday: {
+    color: DSColors.danger,
+  },
+  legend: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 24,
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: DSColors.borderLight,
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  legendDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+  },
+  legendText: {
+    ...DSTypography.caption,
+    color: DSColors.text.secondary,
+  },
+});
+
+// ─── Screen styles ────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   safeArea: {
@@ -183,29 +426,6 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: DSLayout.screenPadding,
     paddingTop: 8,
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: DSLayout.sectionGap,
-  },
-  greeting: {
-    ...DSTypography.body,
-    color: DSColors.text.secondary,
-  },
-  patientName: {
-    ...DSTypography.h1,
-    color: DSColors.text.primary,
-    marginTop: 4,
-  },
-  avatar: {
-    width: 56,
-    height: 56,
-    borderRadius: DSShape.radiusRound,
-    backgroundColor: DSColors.primaryLight,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   startSessionCard: {
     backgroundColor: DSColors.surface,
@@ -255,6 +475,11 @@ const styles = StyleSheet.create({
     backgroundColor: DSColors.border,
     marginVertical: 4,
   },
+  paramIcon: {
+    width: 72,
+    height: 72,
+    marginBottom: 10,
+  },
   paramLabel: {
     ...DSTypography.caption,
     color: DSColors.text.secondary,
@@ -262,21 +487,6 @@ const styles = StyleSheet.create({
   },
   paramValue: {
     ...DSTypography.data,
-    color: DSColors.primary,
-  },
-  areaChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'center',
-    gap: 6,
-    backgroundColor: DSColors.primaryLight,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: DSShape.radiusChip,
-    marginBottom: 16,
-  },
-  areaChipText: {
-    ...DSTypography.bodyBold,
     color: DSColors.primary,
   },
   startSessionCta: {
@@ -294,31 +504,12 @@ const styles = StyleSheet.create({
     color: DSColors.text.inverse,
     fontSize: 18,
   },
-  manualPracticeButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    backgroundColor: DSColors.primaryLight,
-    borderRadius: DSShape.radiusButton,
-    paddingVertical: 18,
-    paddingHorizontal: 24,
-    marginTop: 12,
-    borderWidth: 2,
-    borderColor: DSColors.primary,
-  },
-  manualPracticeButtonPressed: { opacity: 0.9 },
-  manualPracticeButtonText: {
-    ...DSTypography.bodyBold,
-    color: DSColors.primary,
-    fontSize: 17,
-  },
   card: {
     backgroundColor: DSColors.surface,
     borderRadius: DSShape.radiusCard,
     padding: DSLayout.cardPadding,
-    marginBottom: 8,
-    marginTop: 8,
+    marginBottom: 16,
+    marginTop: 16,
   },
   cardTitle: {
     ...DSTypography.h3,
@@ -327,73 +518,8 @@ const styles = StyleSheet.create({
   cardSubtitle: {
     ...DSTypography.caption,
     color: DSColors.text.secondary,
-    marginBottom: 12,
-  },
-  weekRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  dayColumn: {
-    alignItems: 'center',
-    flex: 1,
-  },
-  dayCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 6,
-  },
-  dayCircleDone: {
-    backgroundColor: DSColors.success,
-  },
-  dayCirclePending: {
-    backgroundColor: DSColors.borderLight,
-  },
-  dayLetter: {
-    ...DSTypography.captionBold,
-    color: DSColors.text.secondary,
-  },
-  dayLabel: {
-    ...DSTypography.small,
-    color: DSColors.text.secondary,
-  },
-  dayLabelDone: {
-    color: DSColors.success,
-    fontWeight: '600',
-  },
-  appointmentCard: { marginTop: 4 },
-  appointmentHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
-  },
-  appointmentWhen: {
-    ...DSTypography.dataSmall,
-    color: DSColors.primary,
-  },
-  appointmentDoctor: {
-    ...DSTypography.body,
-    color: DSColors.text.primary,
-    marginTop: 4,
     marginBottom: 16,
-  },
-  primaryButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: DSColors.primary,
-    borderRadius: DSShape.radiusButton,
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-  },
-  primaryButtonPressed: { opacity: 0.9 },
-  primaryButtonText: {
-    ...DSTypography.bodyBold,
-    color: DSColors.text.inverse,
+    marginTop: 4,
   },
   bottomSpacer: { height: 32 },
 });

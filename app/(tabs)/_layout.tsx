@@ -4,26 +4,25 @@ import { Platform } from 'react-native';
 
 import { HapticTab } from '@/components/haptic-tab';
 import { IconSymbol } from '@/components/ui/icon-symbol';
+import { DSColors } from '@/constants/design-system';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-
-const TEAL = '#0B8FAC';
-const TEAL_DARK = '#1DD4B3';
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
-  const activeColor = isDark ? TEAL_DARK : TEAL;
+  // Use a brighter red on dark backgrounds for legibility, brand red otherwise.
+  const activeColor = DSColors.primary;
 
   return (
     <Tabs
       screenOptions={{
         tabBarActiveTintColor: activeColor,
-        tabBarInactiveTintColor: isDark ? '#6B7A8A' : '#9BA8B3',
+        tabBarInactiveTintColor: '#9BA8B3',
         headerShown: false,
         tabBarButton: HapticTab,
         tabBarStyle: {
-          backgroundColor: isDark ? '#1C2128' : '#FFFFFF',
-          borderTopColor: isDark ? '#2D3945' : '#E2EBF0',
+          backgroundColor: '#FFFFFF',
+          borderTopColor: '#E2EBF0',
           ...Platform.select({
             ios: {
               shadowColor: '#000',

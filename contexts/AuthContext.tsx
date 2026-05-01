@@ -1,5 +1,9 @@
 /**
- * Auth state and persistence. Phone-only login; stored in AsyncStorage.
+ * Auth state and persistence.
+ *
+ * Tracks both the user's role (patient | doctor) and a per-role identifier
+ * (patient phone number, or doctor username for the mock login). Persists in
+ * AsyncStorage so role-based routing survives app relaunches.
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -13,55 +17,103 @@ import {
 } from 'react';
 
 const AUTH_PHONE_KEY = '@cpe465_auth_phone';
+const AUTH_ROLE_KEY = '@cpe465_auth_role';
+const AUTH_ID_KEY = '@cpe465_auth_id';
+
+export type Role = 'patient' | 'doctor';
 
 type AuthState = {
   isLoggedIn: boolean;
   isLoading: boolean;
-  login: (phoneNumber: string) => Promise<void>;
+  role: Role | null;
+  identifier: string | null;
+  loginPatient: (phoneNumber: string) => Promise<void>;
+  loginDoctor: (username: string) => Promise<void>;
   logout: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthState | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [role, setRole] = useState<Role | null>(null);
+  const [identifier, setIdentifier] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    AsyncStorage.getItem(AUTH_PHONE_KEY)
-      .then((phone) => {
-        if (!cancelled) {
-          setIsLoggedIn(!!phone && phone.length >= 10);
+    (async () => {
+      try {
+        const [storedRole, storedId, legacyPhone] = await Promise.all([
+          AsyncStorage.getItem(AUTH_ROLE_KEY),
+          AsyncStorage.getItem(AUTH_ID_KEY),
+          AsyncStorage.getItem(AUTH_PHONE_KEY),
+        ]);
+
+        if (cancelled) return;
+
+        if (storedRole === 'patient' || storedRole === 'doctor') {
+          setRole(storedRole);
+          setIdentifier(storedId ?? legacyPhone ?? null);
+        } else if (legacyPhone && legacyPhone.length >= 10) {
+          // Migrate older installs that only stored the patient phone.
+          setRole('patient');
+          setIdentifier(legacyPhone);
+          await AsyncStorage.multiSet([
+            [AUTH_ROLE_KEY, 'patient'],
+            [AUTH_ID_KEY, legacyPhone],
+          ]);
         }
-      })
-      .catch(() => {
-        if (!cancelled) setIsLoggedIn(false);
-      })
-      .finally(() => {
+      } catch {
+        if (!cancelled) {
+          setRole(null);
+          setIdentifier(null);
+        }
+      } finally {
         if (!cancelled) setIsLoading(false);
-      });
+      }
+    })();
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const login = useCallback(async (phoneNumber: string) => {
+  const loginPatient = useCallback(async (phoneNumber: string) => {
     const cleaned = phoneNumber.replace(/\D/g, '');
     if (cleaned.length < 10) return;
-    await AsyncStorage.setItem(AUTH_PHONE_KEY, cleaned);
-    setIsLoggedIn(true);
+    await AsyncStorage.multiSet([
+      [AUTH_ROLE_KEY, 'patient'],
+      [AUTH_ID_KEY, cleaned],
+      [AUTH_PHONE_KEY, cleaned],
+    ]);
+    setRole('patient');
+    setIdentifier(cleaned);
+  }, []);
+
+  const loginDoctor = useCallback(async (username: string) => {
+    const trimmed = username.trim();
+    if (!trimmed) return;
+    await AsyncStorage.multiSet([
+      [AUTH_ROLE_KEY, 'doctor'],
+      [AUTH_ID_KEY, trimmed],
+    ]);
+    await AsyncStorage.removeItem(AUTH_PHONE_KEY);
+    setRole('doctor');
+    setIdentifier(trimmed);
   }, []);
 
   const logout = useCallback(async () => {
-    await AsyncStorage.removeItem(AUTH_PHONE_KEY);
-    setIsLoggedIn(false);
+    await AsyncStorage.multiRemove([AUTH_ROLE_KEY, AUTH_ID_KEY, AUTH_PHONE_KEY]);
+    setRole(null);
+    setIdentifier(null);
   }, []);
 
   const value: AuthState = {
-    isLoggedIn,
+    isLoggedIn: role !== null,
     isLoading,
-    login,
+    role,
+    identifier,
+    loginPatient,
+    loginDoctor,
     logout,
   };
 
