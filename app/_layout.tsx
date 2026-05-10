@@ -11,6 +11,7 @@ import { CustomHeader } from '@/components/CustomHeader';
 import { GluestackUIProvider } from '@/components/ui/gluestack-ui-provider';
 import { DSColors } from '@/constants/design-system';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
+import { DevicePairedProvider } from '@/contexts/DevicePairedContext';
 import '@/global.css';
 
 function RootContent() {
@@ -66,10 +67,12 @@ export default function RootLayout() {
     <GluestackUIProvider mode={colorScheme ?? 'light'}>
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
         <AuthProvider>
-          <MockDeviceProvider>
-            <RootContent />
-            <StatusBar style="dark" />
-          </MockDeviceProvider>
+          <DevicePairedProvider>
+            <MockDeviceProvider>
+              <RootContent />
+              <StatusBar style="dark" />
+            </MockDeviceProvider>
+          </DevicePairedProvider>
         </AuthProvider>
       </ThemeProvider>
     </GluestackUIProvider>

@@ -14,6 +14,7 @@ import {
   AppState,
   AppStateStatus,
   Image,
+  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -24,8 +25,17 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { DSColors, DSShape, DSTypography } from '@/constants/design-system';
 import { CircularTimer } from '@/components/ui/CircularTimer';
+import { DSColors, DSShape, DSTypography } from '@/constants/design-system';
+import { useDevicePaired } from '@/contexts/DevicePairedContext';
+import {
+  sendSessionComplete,
+  sendSessionParametersUpdate,
+  sendSessionPause,
+  sendSessionRestart,
+  sendSessionResume,
+  sendStartCommand,
+} from '@/services/deviceService';
 
 const IMG_KNEE = require('@/assets/images/knee.png');
 
@@ -134,6 +144,7 @@ export interface ActiveTherapySessionProps {
 export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySessionProps) {
   const router = useRouter();
   const theme = isManualMode ? THEME_MANUAL : THEME_DOCTOR;
+  const { clearDevicePaired, markDevicePaired } = useDevicePaired();
 
   // Presets: Doctor mode from API; Manual mode uses MANUAL_DEFAULTS.
   const [doctorPresets, setDoctorPresets] = useState<DoctorPresets | null>(null);
@@ -164,6 +175,10 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
   const [deviceConnected] = useState(true);
   const [signalStrength] = useState<'good' | 'fair' | 'poor'>('good');
 
+  // Mock IoT link-loss demo (professor-facing)
+  const [deviceLostStage, setDeviceLostStage] = useState<'none' | 'error' | 'reconnecting'>('none');
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Draft text for editable TextInput fields (sync'd from numeric state via useEffect)
   const [flexionText, setFlexionText] = useState(String(isManualMode ? 45 : 90));
   const [extensionText, setExtensionText] = useState('0');
@@ -176,8 +191,14 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
   const actualMaxForceNRef = useRef(presets.targetForceN);
   const targetFlexionRef = useRef(targetFlexion);
   const targetForceNRef = useRef(targetForceN);
+  const targetExtensionRef = useRef(targetExtension);
+  const targetSpeedRef = useRef(targetSpeed);
+  const timeLeftRef = useRef(timeLeft);
   targetFlexionRef.current = targetFlexion;
   targetForceNRef.current = targetForceN;
+  targetExtensionRef.current = targetExtension;
+  targetSpeedRef.current = targetSpeed;
+  timeLeftRef.current = timeLeft;
   const sessionStateRef = useRef(sessionState);
   sessionStateRef.current = sessionState;
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -257,6 +278,15 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
             clearInterval(timerRef.current);
             timerRef.current = null;
           }
+          void sendSessionComplete({
+            kind: 'timer_expired',
+            timeLeftSeconds: 0,
+            targetFlexion: targetFlexionRef.current,
+            targetExtension: targetExtensionRef.current,
+            targetForceN: targetForceNRef.current,
+            speed: targetSpeedRef.current,
+            durationMinutes: presets.durationMinutes,
+          });
           setSessionState('FINISHED');
           timeCompletedRef.current = durationSeconds;
           maxFlexionRef.current = targetFlexionRef.current;
@@ -331,14 +361,38 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
   useEffect(() => { setForceText(String(targetForceN)); }, [targetForceN]);
 
   const handleStartSession = useCallback(() => {
+    void sendStartCommand({
+      angleFlexion: targetFlexion,
+      angleExtension: targetExtension,
+      speed: targetSpeed,
+      forceN: targetForceN,
+      durationMinutes: presets.durationMinutes,
+      isManualMode,
+    });
     setSessionState('RUNNING');
     setTimeLeft(presets.durationMinutes * 60);
     setIsWarmingUp(presets.useWarmUp);
     setPainLevel(null);
     setPostResultStatus('idle');
-  }, [presets.durationMinutes, presets.useWarmUp]);
+  }, [
+    presets.durationMinutes,
+    presets.useWarmUp,
+    targetFlexion,
+    targetExtension,
+    targetSpeed,
+    targetForceN,
+    isManualMode,
+  ]);
 
-  const handleEmergencyStop = useCallback(() => {
+  const handleFinishSession = useCallback(() => {
+    void sendSessionComplete({
+      timeLeftSeconds: timeLeft,
+      targetFlexion,
+      targetExtension: targetExtensionRef.current,
+      targetForceN: targetForceNRef.current,
+      speed: targetSpeedRef.current,
+      durationMinutes: presets.durationMinutes,
+    });
     const durationSeconds = presets.durationMinutes * 60;
     const elapsed = durationSeconds - timeLeft;
     timeCompletedRef.current = elapsed;
@@ -348,13 +402,98 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
   }, [timeLeft, targetFlexion, presets.durationMinutes]);
 
   const handlePause = useCallback(() => {
-    setSessionState((s) => (s === 'RUNNING' ? 'PAUSED' : 'RUNNING'));
-  }, []);
+    setSessionState((s) => {
+      if (s === 'RUNNING') {
+        void sendSessionPause({
+          sessionState: 'PAUSED',
+          timeLeftSeconds: timeLeftRef.current,
+          angleFlexion: targetFlexionRef.current,
+          angleExtension: targetExtensionRef.current,
+          speed: targetSpeedRef.current,
+          forceN: targetForceNRef.current,
+          isManualMode,
+        });
+        return 'PAUSED';
+      }
+      if (s === 'PAUSED') {
+        void sendSessionResume({
+          sessionState: 'RUNNING',
+          timeLeftSeconds: timeLeftRef.current,
+          angleFlexion: targetFlexionRef.current,
+          angleExtension: targetExtensionRef.current,
+          speed: targetSpeedRef.current,
+          forceN: targetForceNRef.current,
+          isManualMode,
+        });
+        return 'RUNNING';
+      }
+      return s;
+    });
+  }, [isManualMode]);
 
   const handleReset = useCallback(() => {
-    setTimeLeft(presets.durationMinutes * 60);
+    const full = presets.durationMinutes * 60;
+    void sendSessionRestart({
+      sessionState: 'RUNNING',
+      timeLeftSeconds: full,
+      angleFlexion: targetFlexionRef.current,
+      angleExtension: targetExtensionRef.current,
+      speed: targetSpeedRef.current,
+      forceN: targetForceNRef.current,
+      isManualMode,
+      durationMinutes: presets.durationMinutes,
+    });
+    setTimeLeft(full);
     setSessionState('RUNNING');
-  }, [presets.durationMinutes]);
+  }, [presets.durationMinutes, isManualMode]);
+
+  // Debounced sync of treatment parameters to mock hardware while session is active.
+  useEffect(() => {
+    if (sessionStateRef.current !== 'RUNNING' && sessionStateRef.current !== 'PAUSED') return;
+    const t = setTimeout(() => {
+      if (sessionStateRef.current !== 'RUNNING' && sessionStateRef.current !== 'PAUSED') return;
+      void sendSessionParametersUpdate({
+        sessionState: sessionStateRef.current === 'PAUSED' ? 'PAUSED' : 'RUNNING',
+        timeLeftSeconds: timeLeftRef.current,
+        angleFlexion: targetFlexionRef.current,
+        angleExtension: targetExtensionRef.current,
+        speed: targetSpeedRef.current,
+        forceN: targetForceNRef.current,
+        isManualMode,
+      });
+    }, 450);
+    return () => clearTimeout(t);
+  }, [targetFlexion, targetExtension, targetSpeed, targetForceN, isManualMode]);
+
+  useEffect(() => {
+    return () => {
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  const handleSimulateDisconnect = useCallback(() => {
+    if (deviceLostStage !== 'none') return;
+    if (sessionState !== 'RUNNING' && sessionState !== 'PAUSED') return;
+    setSessionState('PAUSED');
+    setDeviceLostStage('error');
+    void clearDevicePaired();
+  }, [sessionState, deviceLostStage, clearDevicePaired]);
+
+  const handleReconnectDevice = useCallback(() => {
+    setDeviceLostStage('reconnecting');
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+    }
+    reconnectTimerRef.current = setTimeout(() => {
+      reconnectTimerRef.current = null;
+      setDeviceLostStage('none');
+      setSessionState('RUNNING');
+      void markDevicePaired();
+    }, 2000);
+  }, [markDevicePaired]);
 
   // Steppers always active: patient can adjust at any time (e.g. in case of pain).
   const FLEXION_MIN = 0;
@@ -710,10 +849,28 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
   }
 
   // ─── RUNNING / PAUSED ───────────────────────────────────────────────────
-  const isPaused = sessionState === 'PAUSED';
+  const isPaused = sessionState === 'PAUSED' || deviceLostStage !== 'none';
+  const sessionActionsLocked = deviceLostStage !== 'none';
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
+      <View style={styles.sessionRoot}>
+        <TouchableOpacity
+          style={styles.simulateDisconnectBtn}
+          onPress={handleSimulateDisconnect}
+          activeOpacity={0.75}
+          accessibilityRole="button"
+          accessibilityLabel="จำลองอุปกรณ์หลุด"
+        >
+          <View style={styles.wifiSlashWrap}>
+            <Ionicons name="wifi-outline" size={18} color={DSColors.text.secondary} />
+            <View style={styles.wifiSlashLine} />
+          </View>
+          <Text style={styles.simulateDisconnectText} numberOfLines={1}>
+            จำลองอุปกรณ์หลุด
+          </Text>
+        </TouchableOpacity>
+
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
@@ -1036,6 +1193,7 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
             activeOpacity={0.75}
             style={[styles.bottomBtnOutline, isPaused && styles.bottomBtnOutlinePaused]}
             onPress={handlePause}
+            disabled={sessionActionsLocked}
           >
             <Ionicons name={isPaused ? 'play' : 'pause'} size={20} color={isPaused ? DSColors.success : DSColors.primary} />
             <Text style={[styles.bottomBtnOutlineLabel, isPaused && { color: DSColors.success }]}>
@@ -1045,20 +1203,59 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
           </TouchableOpacity>
 
           {/* Reset */}
-          <TouchableOpacity activeOpacity={0.75} style={styles.bottomBtnOutline} onPress={handleReset}>
+          <TouchableOpacity activeOpacity={0.75} style={styles.bottomBtnOutline} onPress={handleReset} disabled={sessionActionsLocked}>
             <Ionicons name="refresh-outline" size={20} color={DSColors.text.secondary} />
             <Text style={[styles.bottomBtnOutlineLabel, { color: DSColors.text.secondary }]}>เริ่มใหม่</Text>
             <Text style={styles.bottomBtnSub}>Reset</Text>
           </TouchableOpacity>
 
           {/* Finish session */}
-          <TouchableOpacity activeOpacity={0.75} style={styles.bottomBtnFinish} onPress={handleEmergencyStop}>
+          <TouchableOpacity activeOpacity={0.75} style={styles.bottomBtnFinish} onPress={handleFinishSession} disabled={sessionActionsLocked}>
             <Ionicons name="checkmark-circle" size={20} color="#FFFFFF" />
             <Text style={styles.bottomBtnFinishLabel}>เสร็จสิ้นการฝึก</Text>
             <Text style={[styles.bottomBtnSub, { color: 'rgba(255,255,255,0.75)' }]}>Finish Session</Text>
           </TouchableOpacity>
         </View>
       </View>
+    </View>
+
+      <Modal
+        visible={deviceLostStage !== 'none'}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+      >
+        <View style={styles.deviceLostBackdrop} pointerEvents="box-none">
+          <View style={styles.deviceLostSheet}>
+            {deviceLostStage === 'reconnecting' ? (
+              <>
+                <ActivityIndicator size="large" color={DSColors.primary} />
+                <Text style={styles.deviceLostTitle}>กำลังเชื่อมต่อใหม่...</Text>
+                <Text style={styles.deviceLostSub}>Reconnecting to device...</Text>
+              </>
+            ) : (
+              <>
+                <View style={styles.deviceLostIconWrap}>
+                  <Ionicons name="warning" size={56} color={DSColors.danger} />
+                </View>
+                <Text style={styles.deviceLostTitle}>
+                  ข้อผิดพลาด: ขาดการเชื่อมต่อกับอุปกรณ์!
+                </Text>
+                <Text style={styles.deviceLostSub}>Error: Device connection lost</Text>
+                <TouchableOpacity
+                  style={styles.reconnectBtn}
+                  onPress={handleReconnectDevice}
+                  activeOpacity={0.85}
+                  accessibilityRole="button"
+                  accessibilityLabel="ลองเชื่อมต่อใหม่"
+                >
+                  <Text style={styles.reconnectBtnText}>ลองเชื่อมต่อใหม่</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -1067,6 +1264,90 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: DSColors.background,
+  },
+  sessionRoot: {
+    flex: 1,
+  },
+  simulateDisconnectBtn: {
+    position: 'absolute',
+    top: 6,
+    right: 10,
+    zIndex: 40,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    backgroundColor: DSColors.surface,
+    borderRadius: DSShape.radiusChip,
+    borderWidth: 1,
+    borderColor: DSColors.borderLight,
+    maxWidth: 220,
+  },
+  wifiSlashWrap: {
+    width: 22,
+    height: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  wifiSlashLine: {
+    position: 'absolute',
+    width: 26,
+    height: 2,
+    borderRadius: 1,
+    backgroundColor: DSColors.danger,
+    transform: [{ rotate: '-42deg' }],
+  },
+  simulateDisconnectText: {
+    ...DSTypography.small,
+    color: DSColors.text.secondary,
+    fontWeight: '600',
+    flexShrink: 1,
+  },
+  deviceLostBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(17, 24, 39, 0.72)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  deviceLostSheet: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: DSColors.surface,
+    borderRadius: DSShape.radiusCard,
+    paddingVertical: 32,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: DSColors.danger + '55',
+  },
+  deviceLostIconWrap: {
+    marginBottom: 8,
+  },
+  deviceLostTitle: {
+    ...DSTypography.h3,
+    color: DSColors.primaryDark,
+    textAlign: 'center',
+  },
+  deviceLostSub: {
+    ...DSTypography.caption,
+    color: DSColors.text.secondary,
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  reconnectBtn: {
+    marginTop: 24,
+    backgroundColor: DSColors.primary,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: DSShape.radiusButton,
+    alignSelf: 'stretch',
+  },
+  reconnectBtnText: {
+    ...DSTypography.bodyBold,
+    color: DSColors.text.inverse,
+    textAlign: 'center',
   },
   loadingContainer: {
     flex: 1,

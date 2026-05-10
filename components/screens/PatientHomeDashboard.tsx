@@ -23,6 +23,7 @@ const IMG_KNEE = require('@/assets/images/knee.png');
 
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { DeviceConnectionModal } from '@/components/ui/DeviceConnectionModal';
 import {
   DSColors,
   DSLayout,
@@ -30,6 +31,7 @@ import {
   DSShape,
   DSTypography,
 } from '@/constants/design-system';
+import { useMockDeviceConnection } from '@/hooks/useMockDeviceConnection';
 
 // ─── API config ──────────────────────────────────────────────────────────────
 const API_BASE =
@@ -404,6 +406,14 @@ function GoalChip({ iconName, label, value, muted = false }: GoalChipProps) {
 
 export function PatientHomeDashboard() {
   const router = useRouter();
+  const {
+    visible: deviceModalVisible,
+    status: deviceStatus,
+    startMockConnection,
+    selectDiscoveredDevice,
+    dismiss: dismissDeviceModal,
+    canDismiss: deviceModalCanDismiss,
+  } = useMockDeviceConnection();
 
   const [planState, setPlanState] = useState<PlanState>('loading');
   const [todayPlan, setTodayPlan] = useState<TodayPlan | null>(null);
@@ -469,7 +479,7 @@ export function PatientHomeDashboard() {
           <Text style={styles.emptySub}>No prescription for today</Text>
           <Pressable
             style={({ pressed }) => [styles.manualBigBtn, pressed && { opacity: 0.88 }]}
-            onPress={() => router.push('/manual-setup')}
+            onPress={() => startMockConnection(() => router.push('/manual-setup'))}
             accessibilityLabel="เข้าสู่โหมดฝึกอิสระ"
           >
             <Ionicons name="play-circle" size={28} color={DSColors.text.inverse} />
@@ -493,7 +503,7 @@ export function PatientHomeDashboard() {
           allDone && styles.startSessionCardDone,
           !allDone && pressed && styles.startSessionCardPressed,
         ]}
-        onPress={() => router.push('/therapy-session')}
+        onPress={() => startMockConnection(() => router.push('/therapy-session'))}
         accessibilityLabel={allDone ? 'ทำครบทุกเซสชันแล้ว' : 'เริ่มเซสชันกายภาพบำบัด'}
       >
         <View style={styles.startSessionHeader}>
@@ -601,6 +611,14 @@ export function PatientHomeDashboard() {
 
         <View style={styles.bottomSpacer} />
       </ScrollView>
+
+      <DeviceConnectionModal
+        visible={deviceModalVisible}
+        status={deviceStatus}
+        onSelectDevice={selectDiscoveredDevice}
+        allowDismiss={deviceModalCanDismiss}
+        onRequestClose={dismissDeviceModal}
+      />
     </SafeAreaView>
   );
 }

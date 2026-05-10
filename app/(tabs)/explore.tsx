@@ -1,18 +1,22 @@
 /**
  * Settings (ตั้งค่า) – Patient app settings: profile, device, preferences, logout.
- * Grouped list style (iOS/Android).
+ * CPM pairing status ซิงก์กับ DevicePairedContext (เดียวกับ flow สแกนหน้า Home).
  */
 
-import { useRouter } from 'expo-router';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
-import { useColorScheme } from '@/hooks/use-color-scheme';
-import { useMockDevice } from '@/hooks/useMockDevice';
+import { DeviceConnectionModal, MOCK_DEVICE_DISPLAY_NAME } from '@/components/ui/DeviceConnectionModal';
 import { useAuth } from '@/contexts/AuthContext';
-import { DSColors } from '@/constants/design-system';
-
-const TEAL = DSColors.primary;
+import { useDevicePaired } from '@/contexts/DevicePairedContext';
+import {
+  DSColors,
+  DSLayout,
+  DSShape,
+  DSTypography,
+} from '@/constants/design-system';
+import { useMockDeviceConnection } from '@/hooks/useMockDeviceConnection';
 
 // Mock
 const MOCK_PATIENT_NAME = 'คุณสมชาย ใจดี';
@@ -20,40 +24,54 @@ const MOCK_PATIENT_ID = 'PID-2401';
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const isDark = useColorScheme() === 'dark';
-  const mock = useMockDevice();
   const auth = useAuth();
+  const { isPaired, hydrated, clearDevicePaired } = useDevicePaired();
 
-  const bg = isDark ? '#0D1117' : '#F0F4F8';
-  const cardBg = isDark ? '#1C2128' : '#FFFFFF';
-  const textPrimary = isDark ? '#E8EDF2' : '#1A2B3C';
-  const textSecondary = isDark ? '#8FA0B0' : '#6B7280';
-  const borderColor = isDark ? '#2D3945' : '#E5E7EB';
-  const primaryColor = isDark ? '#1DD4B3' : TEAL;
+  const {
+    visible: pairModalVisible,
+    status: pairStatus,
+    startMockConnection,
+    selectDiscoveredDevice,
+    dismiss: dismissPairModal,
+    canDismiss: pairModalCanDismiss,
+  } = useMockDeviceConnection();
 
-  const deviceConnected = mock.connectionStatus === 'connected';
-  const deviceStatusText =
-    mock.connectionStatus === 'connected'
-      ? '🟢 เชื่อมต่อแล้ว'
-      : mock.connectionStatus === 'connecting'
-        ? '🟡 กำลังเชื่อมต่อ...'
-        : '🔴 ยังไม่เชื่อมต่อ';
+  const cpmStatusLine = !hydrated
+    ? 'กำลังตรวจสอบสถานะ...'
+    : isPaired
+      ? `จับคู่แล้ว: ${MOCK_DEVICE_DISPLAY_NAME}`
+      : 'ยังไม่ได้จับคู่เครื่อง CPM — แตะเพื่อสแกนหาอุปกรณ์';
 
-  const handleConnectDevice = () => {
-    if (deviceConnected) mock.disconnectDevice();
-    else mock.connectDevice();
+  const handleCpmDeviceRow = () => {
+    if (!hydrated) return;
+    if (isPaired) {
+      Alert.alert(
+        'ยกเลิกการจับคู่',
+        'ต้องการตัดการเชื่อมต่อกับอุปกรณ์หรือไม่? ครั้งถัดไปเมื่อเริ่มเซสชันจะต้องสแกนหาอุปกรณ์ใหม่',
+        [
+          { text: 'ไม่', style: 'cancel' },
+          {
+            text: 'ตัดการเชื่อมต่อ',
+            style: 'destructive',
+            onPress: () => void clearDevicePaired(),
+          },
+        ]
+      );
+      return;
+    }
+    startMockConnection(() => {
+      Alert.alert('จับคู่สำเร็จ', `เชื่อมต่อกับ ${MOCK_DEVICE_DISPLAY_NAME} แล้ว`);
+    });
   };
 
-  const handleUserGuide = () => {
-    // Placeholder: open guide
-  };
+  const handleUserGuide = () => {};
 
-  const handleContactSupport = () => {
-    // Placeholder: open contact
-  };
+  const handleContactSupport = () => {};
 
   const handleLogout = async () => {
     await auth.logout();
+    router.dismissAll();
+    router.replace('/');
   };
 
   const handleManualSetup = () => {
@@ -61,117 +79,101 @@ export default function SettingsScreen() {
   };
 
   return (
-    <View style={[styles.screen, { backgroundColor: bg }]}>
+    <View style={styles.screen}>
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
         {/* Profile Section */}
-        <View style={[styles.card, { backgroundColor: cardBg, borderColor }]}>
+        <View style={styles.card}>
           <View style={styles.profileRow}>
-            <View style={[styles.avatar, { backgroundColor: primaryColor + '25' }]}>
-              <Ionicons name="person" size={40} color={primaryColor} />
+            <View style={[styles.avatar, { backgroundColor: DSColors.primaryLight }]}>
+              <Ionicons name="person" size={40} color={DSColors.primary} />
             </View>
             <View style={styles.profileInfo}>
-              <Text style={[styles.patientName, { color: textPrimary }]}>{MOCK_PATIENT_NAME}</Text>
-              <Text style={[styles.patientId, { color: textSecondary }]}>
+              <Text style={styles.patientName}>{MOCK_PATIENT_NAME}</Text>
+              <Text style={styles.patientId}>
                 รหัสผู้ป่วย (Patient ID): {MOCK_PATIENT_ID}
               </Text>
             </View>
           </View>
         </View>
 
-        {/* Device Connection */}
-        <View style={[styles.card, { backgroundColor: cardBg, borderColor }]}>
+        {/* CPM / Bluetooth pairing (same state as Home flow) */}
+        <View style={styles.card}>
           <TouchableOpacity
             style={styles.menuRow}
-            onPress={handleConnectDevice}
+            onPress={handleCpmDeviceRow}
             activeOpacity={0.7}
+            disabled={!hydrated}
           >
-            <Ionicons name="bluetooth" size={24} color={primaryColor} style={styles.menuIcon} />
+            <Ionicons
+              name="bluetooth"
+              size={24}
+              color={hydrated && isPaired ? DSColors.success : DSColors.primary}
+              style={styles.menuIcon}
+            />
             <View style={styles.menuTextWrap}>
-              <Text style={[styles.menuTitle, { color: textPrimary }]}>
-                เชื่อมต่อเครื่องกายภาพ (Connect Device)
-              </Text>
-              <Text style={[styles.menuSub, { color: textSecondary }]}>
-                {deviceStatusText}
-              </Text>
+              <Text style={styles.menuTitle}>เชื่อมต่อเครื่องกายภาพ (CPM)</Text>
+              <View style={styles.statusRow}>
+                {hydrated && isPaired ? (
+                  <>
+                    <Ionicons name="checkmark-circle" size={18} color={DSColors.success} style={styles.statusIcon} />
+                    <Text style={styles.menuSubPaired} numberOfLines={2}>
+                      {cpmStatusLine}
+                    </Text>
+                  </>
+                ) : (
+                  <>
+                    <View
+                      style={[
+                        styles.statusDot,
+                        !hydrated ? styles.statusDotPending : styles.statusDotOff,
+                      ]}
+                    />
+                    <Text style={styles.menuSub} numberOfLines={2}>
+                      {cpmStatusLine}
+                    </Text>
+                  </>
+                )}
+              </View>
             </View>
-            <Ionicons name="chevron-forward" size={22} color={textSecondary} />
+            <Ionicons name="chevron-forward" size={22} color={DSColors.text.secondary} />
           </TouchableOpacity>
         </View>
 
-        {/* [Dev] Mock Device Toggle – for testing without physical machine */}
-        <View style={[styles.card, { backgroundColor: cardBg, borderColor }]}>
-          <View style={styles.devSection}>
-            <Text style={[styles.devLabel, { color: textSecondary }]}>
-              Developer: simulate device connection and telemetry
-            </Text>
-            <TouchableOpacity
-              style={[
-                styles.devButton,
-                {
-                  backgroundColor: deviceConnected ? '#6B7280' : primaryColor,
-                },
-              ]}
-              onPress={handleConnectDevice}
-              activeOpacity={0.7}
-              disabled={mock.connectionStatus === 'connecting'}
-            >
-              <Text style={styles.devButtonText}>
-                {mock.connectionStatus === 'connecting'
-                  ? '⏳ กำลังเชื่อมต่อ...'
-                  : deviceConnected
-                    ? '🔌 [Dev] Disconnect Mock Device'
-                    : '🔌 [Dev] Connect to Mock Device'}
-              </Text>
-            </TouchableOpacity>
-            {deviceConnected && (
-              <Text style={[styles.devHint, { color: textSecondary }]}>
-                Current angle: {mock.currentAngle}° (updates during active session)
-              </Text>
-            )}
-          </View>
-        </View>
-
         {/* Manual Session Setup link */}
-        <View style={[styles.card, { backgroundColor: cardBg, borderColor }]}>
+        <View style={styles.card}>
           <TouchableOpacity
             style={styles.menuRow}
             onPress={handleManualSetup}
             activeOpacity={0.7}
           >
-            <Ionicons name="settings-outline" size={24} color={primaryColor} style={styles.menuIcon} />
-            <Text style={[styles.menuTitle, { color: textPrimary }]}>
-              ตั้งค่าโหมดฝึกอิสระ (Manual Practice Setup)
-            </Text>
-            <Ionicons name="chevron-forward" size={22} color={textSecondary} />
+            <Ionicons name="settings-outline" size={24} color={DSColors.primary} style={styles.menuIcon} />
+            <Text style={styles.menuTitle}>ตั้งค่าโหมดฝึกอิสระ (Manual Practice Setup)</Text>
+            <Ionicons name="chevron-forward" size={22} color={DSColors.text.secondary} />
           </TouchableOpacity>
         </View>
 
         {/* App Preferences */}
-        <View style={[styles.card, { backgroundColor: cardBg, borderColor }]}>
+        <View style={styles.card}>
           <TouchableOpacity
-            style={[styles.menuRow, styles.menuRowBorder, { borderBottomColor: borderColor }]}
+            style={[styles.menuRow, styles.menuRowBorder]}
             onPress={handleUserGuide}
             activeOpacity={0.7}
           >
-            <Ionicons name="book-outline" size={24} color={primaryColor} style={styles.menuIcon} />
-            <Text style={[styles.menuTitle, { color: textPrimary }]}>
-              คู่มือการใช้งาน (User Guide)
-            </Text>
-            <Ionicons name="chevron-forward" size={22} color={textSecondary} />
+            <Ionicons name="book-outline" size={24} color={DSColors.primary} style={styles.menuIcon} />
+            <Text style={styles.menuTitle}>คู่มือการใช้งาน (User Guide)</Text>
+            <Ionicons name="chevron-forward" size={22} color={DSColors.text.secondary} />
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.menuRow}
             onPress={handleContactSupport}
             activeOpacity={0.7}
           >
-            <Ionicons name="chatbubble-ellipses-outline" size={24} color={primaryColor} style={styles.menuIcon} />
-            <Text style={[styles.menuTitle, { color: textPrimary }]}>
-              ติดต่อผู้ดูแล (Contact Doctor/Support)
-            </Text>
-            <Ionicons name="chevron-forward" size={22} color={textSecondary} />
+            <Ionicons name="chatbubble-ellipses-outline" size={24} color={DSColors.primary} style={styles.menuIcon} />
+            <Text style={styles.menuTitle}>ติดต่อผู้ดูแล (Contact Doctor/Support)</Text>
+            <Ionicons name="chevron-forward" size={22} color={DSColors.text.secondary} />
           </TouchableOpacity>
         </View>
 
@@ -181,26 +183,39 @@ export default function SettingsScreen() {
           onPress={handleLogout}
           activeOpacity={0.7}
         >
-          <Ionicons name="log-out-outline" size={24} color="#EF4444" style={styles.logoutIcon} />
+          <Ionicons name="log-out-outline" size={24} color={DSColors.danger} style={styles.logoutIcon} />
           <Text style={styles.logoutText}>ออกจากระบบ (Logout)</Text>
         </TouchableOpacity>
 
         <View style={styles.bottomSpacer} />
       </ScrollView>
+
+      <DeviceConnectionModal
+        visible={pairModalVisible}
+        status={pairStatus}
+        onSelectDevice={selectDiscoveredDevice}
+        allowDismiss={pairModalCanDismiss}
+        onRequestClose={dismissPairModal}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1 },
+  screen: {
+    flex: 1,
+    backgroundColor: DSColors.background,
+  },
   content: {
-    padding: 20,
+    padding: DSLayout.screenPadding,
     paddingBottom: 40,
   },
   card: {
-    borderRadius: 16,
+    borderRadius: DSShape.radiusCard,
     marginBottom: 16,
     borderWidth: 1,
+    borderColor: DSColors.borderLight,
+    backgroundColor: DSColors.surface,
     overflow: 'hidden',
   },
   profileRow: {
@@ -218,12 +233,13 @@ const styles = StyleSheet.create({
   },
   profileInfo: { flex: 1 },
   patientName: {
-    fontSize: 20,
-    fontWeight: '700',
+    ...DSTypography.h3,
+    color: DSColors.text.primary,
     marginBottom: 4,
   },
   patientId: {
-    fontSize: 14,
+    ...DSTypography.caption,
+    color: DSColors.text.secondary,
   },
   menuRow: {
     flexDirection: 'row',
@@ -233,18 +249,50 @@ const styles = StyleSheet.create({
   },
   menuRowBorder: {
     borderBottomWidth: 1,
+    borderBottomColor: DSColors.borderLight,
   },
   menuIcon: {
     marginRight: 14,
   },
   menuTextWrap: { flex: 1 },
   menuTitle: {
-    fontSize: 16,
-    fontWeight: '600',
+    ...DSTypography.bodyBold,
+    color: DSColors.text.primary,
   },
   menuSub: {
-    fontSize: 13,
+    ...DSTypography.caption,
+    color: DSColors.text.secondary,
+    marginTop: 4,
+    flex: 1,
+  },
+  menuSubPaired: {
+    ...DSTypography.captionBold,
+    color: DSColors.success,
     marginTop: 2,
+    flex: 1,
+  },
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 6,
+    paddingRight: 8,
+  },
+  statusIcon: {
+    marginTop: 1,
+  },
+  statusDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  statusDotOff: {
+    backgroundColor: DSColors.border,
+    borderWidth: 1,
+    borderColor: DSColors.text.secondary,
+  },
+  statusDotPending: {
+    backgroundColor: DSColors.warning,
   },
   logoutButton: {
     flexDirection: 'row',
@@ -253,39 +301,18 @@ const styles = StyleSheet.create({
     marginTop: 24,
     paddingVertical: 16,
     paddingHorizontal: 24,
-    borderRadius: 16,
+    borderRadius: DSShape.radiusCard,
     borderWidth: 2,
-    borderColor: '#EF4444',
+    borderColor: DSColors.danger,
+    backgroundColor: DSColors.surface,
   },
   logoutIcon: {
     marginRight: 10,
   },
-  devSection: {
-    padding: 16,
-  },
-  devLabel: {
-    fontSize: 13,
-    marginBottom: 10,
-  },
-  devButton: {
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  devButtonText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  devHint: {
-    fontSize: 12,
-    marginTop: 8,
-  },
   logoutText: {
     fontSize: 17,
     fontWeight: '700',
-    color: '#EF4444',
+    color: DSColors.danger,
   },
   bottomSpacer: { height: 24 },
 });

@@ -9,6 +9,7 @@ import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { DeviceConnectionModal } from '@/components/ui/DeviceConnectionModal';
 import {
   DSColors,
   DSLayout,
@@ -16,6 +17,7 @@ import {
   DSShape,
   DSTypography,
 } from '@/constants/design-system';
+import { useMockDeviceConnection } from '@/hooks/useMockDeviceConnection';
 
 const MAX_SAFE_ANGLE = 65;
 const MAX_SAFE_FORCE = 10;
@@ -134,6 +136,14 @@ const rowStyles = StyleSheet.create({
 
 export default function ManualSetupScreen() {
   const router = useRouter();
+  const {
+    visible,
+    status,
+    startMockConnection,
+    selectDiscoveredDevice,
+    dismiss,
+    canDismiss,
+  } = useMockDeviceConnection();
 
   const [angleStart, setAngleStart] = useState(15);
   const [angleEnd, setAngleEnd] = useState(MAX_SAFE_ANGLE);
@@ -141,7 +151,9 @@ export default function ManualSetupScreen() {
   const [forceN, setForceN] = useState(5);
 
   const handleStart = () => {
-    router.push({ pathname: '/therapy-session', params: { isManualMode: 'true' } });
+    startMockConnection(() =>
+      router.push({ pathname: '/therapy-session', params: { isManualMode: 'true' } })
+    );
   };
 
   return (
@@ -221,6 +233,14 @@ export default function ManualSetupScreen() {
           <Text style={styles.startBtnText}>เริ่มเซสชันอิสระ</Text>
         </TouchableOpacity>
       </ScrollView>
+
+      <DeviceConnectionModal
+        visible={visible}
+        status={status}
+        onSelectDevice={selectDiscoveredDevice}
+        allowDismiss={canDismiss}
+        onRequestClose={dismiss}
+      />
     </SafeAreaView>
   );
 }
