@@ -13,14 +13,21 @@ import {
   Animated,
   AppState,
   AppStateStatus,
+  Image,
   Platform,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+
+import { DSColors, DSShape, DSTypography } from '@/constants/design-system';
+import { CircularTimer } from '@/components/ui/CircularTimer';
+
+const IMG_KNEE = require('@/assets/images/knee.png');
 
 // ─── API config ───────────────────────────────────────────────────────────
 // Priority:
@@ -33,6 +40,23 @@ const MOCK_PATIENT_ID = 1;
 
 // ─── Types ───────────────────────────────────────────────────────────────
 type SessionState = 'PREPARATION' | 'RUNNING' | 'PAUSED' | 'FINISHED';
+
+interface TodayStats {
+  sessionsCompleted: number;
+  totalSessionsTarget: number;
+  totalMinutes: number;
+  maxFlexion: number;
+  targetFlexion: number;
+}
+
+/** Set to null to hide the today stats card during dev */
+const DEV_MOCK_TODAY_STATS: TodayStats = {
+  sessionsCompleted: 1,
+  totalSessionsTarget: 3,
+  totalMinutes: 15,
+  maxFlexion: 62,
+  targetFlexion: 65,
+};
 
 /** Machine preset from doctor's dashboard (API). Force in Newtons (N). */
 export interface DoctorPresets {
@@ -87,18 +111,19 @@ function formatTime(seconds: number) {
   return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
 
-// Theme by mode: Doctor = medical blue/green; Manual = orange/teal
+// Unified DS theme — both doctor and manual modes use University Red palette.
+// Manual-mode emphasis is conveyed via DSColors.warning for the safety banner only.
 const THEME_DOCTOR = {
-  primary: '#0B8FAC',
-  primaryLight: '#E8F6FA',
-  success: '#10B981',
-  successBg: '#ECFDF5',
+  primary: DSColors.primary,
+  primaryLight: DSColors.primaryLight,
+  success: DSColors.success,
+  successBg: DSColors.successLight,
 };
 const THEME_MANUAL = {
-  primary: '#E67E22',
-  primaryLight: '#FEF3E2',
-  success: '#10B981',
-  successBg: '#ECFDF5',
+  primary: DSColors.primary,
+  primaryLight: DSColors.primaryLight,
+  success: DSColors.success,
+  successBg: DSColors.successLight,
 };
 
 export interface ActiveTherapySessionProps {
@@ -131,6 +156,19 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
   // Post-session: pain level (1=😃, 2=😐, 3=😫) and submit status
   const [painLevel, setPainLevel] = useState<1 | 2 | 3 | null>(null);
   const [postResultStatus, setPostResultStatus] = useState<'idle' | 'pending' | 'success' | 'error'>('idle');
+
+  // Today's aggregated stats (fetched once on mount)
+  const [todayStats, setTodayStats] = useState<TodayStats | null>(null);
+
+  // Mock device tracker state
+  const [deviceConnected] = useState(true);
+  const [signalStrength] = useState<'good' | 'fair' | 'poor'>('good');
+
+  // Draft text for editable TextInput fields (sync'd from numeric state via useEffect)
+  const [flexionText, setFlexionText] = useState(String(isManualMode ? 45 : 90));
+  const [extensionText, setExtensionText] = useState('0');
+  const [speedText, setSpeedText] = useState(String(isManualMode ? 2 : 3));
+  const [forceText, setForceText] = useState(String(isManualMode ? 30 : 10));
 
   // For FINISHED summary and session result POST
   const timeCompletedRef = useRef(0);
@@ -279,6 +317,19 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
     return () => loop.stop();
   }, [isWarmingUp, sessionState]);
 
+  // Fetch today's session summary once on mount
+  useEffect(() => {
+    // Use mock during dev; replace with real fetch when API is ready:
+    // fetch(`${API_BASE}/api/sessions/today/${MOCK_PATIENT_ID}`)…
+    setTodayStats(DEV_MOCK_TODAY_STATS);
+  }, []);
+
+  // Keep draft text in sync when numeric values change via stepper buttons
+  useEffect(() => { setFlexionText(String(targetFlexion)); }, [targetFlexion]);
+  useEffect(() => { setExtensionText(String(targetExtension)); }, [targetExtension]);
+  useEffect(() => { setSpeedText(String(targetSpeed)); }, [targetSpeed]);
+  useEffect(() => { setForceText(String(targetForceN)); }, [targetForceN]);
+
   const handleStartSession = useCallback(() => {
     setSessionState('RUNNING');
     setTimeLeft(presets.durationMinutes * 60);
@@ -299,6 +350,11 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
   const handlePause = useCallback(() => {
     setSessionState((s) => (s === 'RUNNING' ? 'PAUSED' : 'RUNNING'));
   }, []);
+
+  const handleReset = useCallback(() => {
+    setTimeLeft(presets.durationMinutes * 60);
+    setSessionState('RUNNING');
+  }, [presets.durationMinutes]);
 
   // Steppers always active: patient can adjust at any time (e.g. in case of pain).
   const FLEXION_MIN = 0;
@@ -424,9 +480,11 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
           contentContainerStyle={styles.preparationScroll}
           showsVerticalScrollIndicator={false}
         >
-          <View style={[styles.preparationIconWrap, { backgroundColor: theme.primaryLight }]}>
-            <Ionicons name="body" size={80} color={theme.primary} />
+          {/* Knee image hero */}
+          <View style={styles.kneeImageWrap}>
+            <Image source={IMG_KNEE} style={styles.kneeImage} resizeMode="contain" />
           </View>
+
           <Text style={styles.preparationTitle}>เตรียมพร้อมก่อนเริ่ม</Text>
           <Text style={styles.preparationMessage}>
             กรุณาวางขาลงบนเครื่องและรัดสายให้เรียบร้อย
@@ -434,53 +492,125 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
           <Text style={styles.preparationSub}>Please place your leg on the machine and secure the straps.</Text>
 
           {isManualMode && (
-            <View style={[styles.manualWarningBanner, { backgroundColor: THEME_MANUAL.primaryLight, borderColor: theme.primary }]}>
-              <Text style={[styles.manualWarningText, { color: theme.primary }]}>
-                อย่าฝืนทำหากรู้สึกเจ็บปวด (Do not force if you feel pain)
+            <View style={[styles.manualWarningBanner, { backgroundColor: DSColors.warningLight, borderColor: DSColors.warning }]}>
+              <Ionicons name="warning-outline" size={18} color={DSColors.warning} />
+              <Text style={[styles.manualWarningText, { color: DSColors.warning }]}>
+                อย่าฝืนทำหากรู้สึกเจ็บปวด
               </Text>
             </View>
           )}
 
-          <View style={[styles.planCard, isManualMode && { borderColor: theme.primary + '40' }]}>
-            <Text style={[styles.planTitle, isManualMode && { color: theme.primary }]}>
-              {isManualMode ? 'โหมดฝึกอิสระ (Manual Practice)' : 'สรุปแผนวันนี้ (Doctor\'s Plan)'}
+          <View style={styles.planCard}>
+            {/* Plan header */}
+            <View style={styles.planHeader}>
+              <Ionicons
+                name={isManualMode ? 'person-circle-outline' : 'medical-outline'}
+                size={22}
+                color={DSColors.primary}
+              />
+              <Text style={styles.planTitle}>
+                {isManualMode ? 'โหมดฝึกอิสระ' : 'สรุปแผนวันนี้'}
+              </Text>
+              {!isManualMode && todayStats && (
+                <View style={styles.planSessionBadge}>
+                  <Text style={styles.planSessionBadgeText}>
+                    กำลังทำครั้งที่ {todayStats.sessionsCompleted + 1} / {todayStats.totalSessionsTarget}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {/* Session progress dots */}
+            {!isManualMode && todayStats && (
+              <View style={styles.planSessionDots}>
+                {Array.from({ length: todayStats.totalSessionsTarget }, (_, i) => (
+                  <View
+                    key={i}
+                    style={[
+                      styles.planSessionDot,
+                      i < todayStats.sessionsCompleted
+                        ? styles.planSessionDotDone
+                        : i === todayStats.sessionsCompleted
+                        ? styles.planSessionDotCurrent
+                        : styles.planSessionDotEmpty,
+                    ]}
+                  />
+                ))}
+              </View>
+            )}
+
+            <Text style={styles.planSubtitle}>
+              {isManualMode
+                ? 'ฝึกเพิ่มเติมตามความเหมาะสม'
+                : 'ปฏิบัติตามคำสั่งแพทย์'}
             </Text>
-            {isManualMode && (
-              <Text style={[styles.planSubtitle, { color: '#6B7280' }]}>
-                ฝึกเพิ่มเติมตามความเหมาะสม (Additional practice at your own pace)
-              </Text>
-            )}
-            {!isManualMode && (
-              <Text style={[styles.planSubtitle, { color: '#6B7280' }]}>
-                ปฏิบัติตามคำสั่งแพทย์ (Following your doctor's plan)
-              </Text>
-            )}
+
+            {/* Parameter rows with icons */}
             <View style={styles.planRow}>
-              <Text style={styles.planLabel}>งอเข่า (Bend)</Text>
+              <View style={styles.planRowLeft}>
+                <View style={styles.planIconWrap}>
+                  <Ionicons name="trending-up" size={18} color={DSColors.primary} />
+                </View>
+                <Text style={styles.planLabel}>งอเข่าสูงสุด</Text>
+              </View>
               <Text style={styles.planValue}>{presets.flexionDegree}°</Text>
             </View>
+
             <View style={styles.planRow}>
-              <Text style={styles.planLabel}>วางขาราบ (Extension)</Text>
+              <View style={styles.planRowLeft}>
+                <View style={styles.planIconWrap}>
+                  <Ionicons name="remove-circle-outline" size={18} color={DSColors.primary} />
+                </View>
+                <Text style={styles.planLabel}>เหยียดขา</Text>
+              </View>
               <Text style={styles.planValue}>{presets.extensionDegree}°</Text>
             </View>
+
             <View style={styles.planRow}>
-              <Text style={styles.planLabel}>ความเร็ว (Speed)</Text>
-              <Text style={styles.planValue}>Level {presets.speed}</Text>
+              <View style={styles.planRowLeft}>
+                <View style={styles.planIconWrap}>
+                  <Ionicons name="speedometer-outline" size={18} color={DSColors.primary} />
+                </View>
+                <Text style={styles.planLabel}>ความเร็ว</Text>
+              </View>
+              <Text style={styles.planValue}>ระดับ {presets.speed}</Text>
             </View>
+
             <View style={styles.planRow}>
-              <Text style={styles.planLabel}>คงค้างที่จุดสิ้นสุด</Text>
-              <Text style={styles.planValue}>{presets.holdTime} วินาที</Text>
+              <View style={styles.planRowLeft}>
+                <View style={styles.planIconWrap}>
+                  <Ionicons name="pause-circle-outline" size={18} color={DSColors.primary} />
+                </View>
+                <Text style={styles.planLabel}>คงค้างที่จุดสิ้นสุด</Text>
+              </View>
+              <Text style={styles.planValue}>{presets.holdTime} วิ</Text>
             </View>
+
             <View style={styles.planRow}>
-              <Text style={styles.planLabel}>ระยะเวลา</Text>
+              <View style={styles.planRowLeft}>
+                <View style={styles.planIconWrap}>
+                  <Ionicons name="time-outline" size={18} color={DSColors.primary} />
+                </View>
+                <Text style={styles.planLabel}>ระยะเวลา</Text>
+              </View>
               <Text style={styles.planValue}>{presets.durationMinutes} นาที</Text>
             </View>
+
             <View style={styles.planRow}>
-              <Text style={styles.planLabel}>Safety Force Limit (แรงจำกัด)</Text>
+              <View style={styles.planRowLeft}>
+                <View style={styles.planIconWrap}>
+                  <Ionicons name="shield-checkmark-outline" size={18} color={DSColors.primary} />
+                </View>
+                <Text style={styles.planLabel}>แรงจำกัด (Safety)</Text>
+              </View>
               <Text style={styles.planValue}>{presets.targetForceN} N</Text>
             </View>
+
             {presets.useWarmUp && (
-              <Text style={styles.planNote}>รวมช่วงวอร์มอัพข้อต่อ</Text>
+              <View style={styles.warmUpNote}>
+                <Ionicons name="flame-outline" size={15} color={DSColors.warning} />
+                <Text style={styles.planNote}>รวมช่วงวอร์มอัพข้อต่อ</Text>
+              </View>
             )}
           </View>
 
@@ -589,204 +719,346 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Mode header */}
-        <View style={[styles.modeHeader, { backgroundColor: theme.primaryLight, borderColor: theme.primary + '50' }]}>
-          <Text style={[styles.modeHeaderTitle, { color: theme.primary }]}>
-            {isManualMode ? 'โหมดฝึกอิสระ (Manual Practice)' : 'การรักษาประจำวัน (Doctor\'s Prescription)'}
-          </Text>
-          <Text style={styles.modeHeaderSub}>
-            {isManualMode ? 'ฝึกเพิ่มเติมตามความเหมาะสม' : 'ปฏิบัติตามคำสั่งแพทย์ (Following your doctor\'s plan)'}
+        {/* Row 1: compact mode chip */}
+        <View style={[styles.modeChip, { backgroundColor: theme.primaryLight, borderColor: theme.primary + '60' }]}>
+          <Ionicons
+            name={isManualMode ? 'person-outline' : 'medical-outline'}
+            size={16}
+            color={theme.primary}
+          />
+          <Text style={[styles.modeChipText, { color: theme.primary }]}>
+            {isManualMode ? 'โหมดฝึกอิสระ' : 'การรักษาประจำวัน'}
           </Text>
           {isManualMode && (
-            <Text style={[styles.modeHeaderWarning, { color: theme.primary }]}>
-              อย่าฝืนทำหากรู้สึกเจ็บปวด (Do not force if you feel pain)
-            </Text>
+            <>
+              <View style={styles.modeChipSep} />
+              <Ionicons name="warning-outline" size={14} color={DSColors.warning} />
+              <Text style={styles.modeChipWarn}>อย่าฝืนทำหากเจ็บปวด</Text>
+            </>
           )}
         </View>
 
-        {/* Timer */}
+        {/* Timer – circular progress ring */}
         <View style={styles.timerSection}>
-          {isPaused && (
-            <View style={styles.pausedBadge}>
-              <Text style={styles.pausedBadgeText}>⏸️ หยุดชั่วคราว</Text>
-            </View>
-          )}
-          <Text style={styles.timerLabel}>เวลาที่เหลือ</Text>
-          <Text style={styles.timerValue}>{formatTime(timeLeft)}</Text>
-          <Text style={styles.timerHint}>นาที</Text>
+          <CircularTimer
+            timeLeft={timeLeft}
+            totalSeconds={presets.durationMinutes * 60}
+            isPaused={isPaused}
+            size={200}
+            strokeWidth={12}
+          />
         </View>
 
         {/* Warm-up badge */}
         {isWarmingUp && sessionState === 'RUNNING' && (
-          <Animated.View
-            style={[
-              styles.warmUpBadge,
-              { transform: [{ scale: pulseAnim }] },
-            ]}
-          >
-            <Text style={styles.warmUpText}>
-              🏃‍♂️ ระบบกำลังวอร์มอัพข้อต่อให้คุ้นเคย (Warming up...)
-            </Text>
+          <Animated.View style={[styles.warmUpBadge, { transform: [{ scale: pulseAnim }] }]}>
+            <Ionicons name="flame-outline" size={16} color={DSColors.warning} />
+            <Text style={styles.warmUpText}>วอร์มอัพข้อต่ออยู่…</Text>
           </Animated.View>
         )}
 
-        {/* Status badge */}
-        <View style={styles.statusBadgeWrap}>
+        {/* Row 2: status chip + force chip side-by-side */}
+        <View style={styles.infoChipsRow}>
+          {/* Status chip */}
           {isManualMode ? (
-            <View style={[styles.statusBadgeSuccess, { backgroundColor: theme.primaryLight, borderColor: theme.primary }]}>
-              <Text style={[styles.statusBadgeSuccessText, { color: theme.primary }]}>
-                โหมดฝึกอิสระ (Manual Practice)
-              </Text>
+            <View style={[styles.infoChip, styles.infoChipPrimary]}>
+              <Ionicons name="person-outline" size={15} color={theme.primary} />
+              <Text style={[styles.infoChipText, { color: theme.primary }]}>โหมดอิสระ</Text>
             </View>
           ) : isCustomSettings ? (
-            <View style={styles.statusBadgeWarning}>
-              <Text style={styles.statusBadgeWarningText}>
-                ⚠️ คุณกำลังใช้ค่าปรับตั้งเอง (Custom Settings)
-              </Text>
+            <View style={[styles.infoChip, styles.infoChipWarn]}>
+              <Ionicons name="create-outline" size={15} color={DSColors.warning} />
+              <Text style={[styles.infoChipText, { color: DSColors.warning }]}>ค่าที่ปรับเอง</Text>
             </View>
           ) : (
-            <View style={[styles.statusBadgeSuccess, styles.statusBadgeRow]}>
-              <Ionicons name="checkmark-circle" size={20} color="#10B981" style={styles.statusBadgeIcon} />
-              <Text style={styles.statusBadgeSuccessText}>
-                ทำตามแผนคุณหมอ (Doctor's Plan)
-              </Text>
+            <View style={[styles.infoChip, styles.infoChipSuccess]}>
+              <Ionicons name="checkmark-circle" size={15} color={DSColors.success} />
+              <Text style={[styles.infoChipText, { color: DSColors.success }]}>ตามแผนหมอ</Text>
             </View>
           )}
-        </View>
 
-        <View style={[styles.safetyForceBanner, { backgroundColor: theme.primaryLight, borderColor: theme.primary }]}>
-          <Text style={styles.safetyForceBannerText}>Safety Force Limit: {targetForceN} N</Text>
-        </View>
-
-        {/* Parameter cards – steppers always active (patient can adjust for pain) */}
-        <View style={styles.paramCard}>
-          <Text style={styles.paramCardTitle}>งอเข่า (Bend Knee)</Text>
-          <Text style={styles.paramCardSub}>Target flexion</Text>
-          <View style={styles.paramRow}>
-            <TouchableOpacity
-              activeOpacity={0.7}
-              style={[styles.paramBtn, atMinFlexion && styles.paramBtnDisabled, { borderColor: theme.primary }]}
-              onPress={() => adjustFlexion(-5)}
-              disabled={atMinFlexion}
-            >
-              <Ionicons name="remove" size={30} color={atMinFlexion ? '#9CA3AF' : theme.primary} />
-            </TouchableOpacity>
-            <Text style={[styles.paramValue, { color: theme.primary }]}>{targetFlexion}°</Text>
-            <TouchableOpacity
-              activeOpacity={0.7}
-              style={[styles.paramBtn, atMaxFlexion && styles.paramBtnDisabled, { borderColor: theme.primary }]}
-              onPress={() => adjustFlexion(5)}
-              disabled={atMaxFlexion}
-            >
-              <Ionicons name="add" size={30} color={atMaxFlexion ? '#9CA3AF' : theme.primary} />
-            </TouchableOpacity>
+          {/* Force chip */}
+          <View style={[styles.infoChip, styles.infoChipPrimary]}>
+            <Ionicons name="shield-checkmark-outline" size={15} color={DSColors.primary} />
+            <Text style={[styles.infoChipText, { color: DSColors.primary }]}>แรงจำกัด {targetForceN} N</Text>
           </View>
-          {customFlexion && (
-            <Text style={styles.customWarningTag}>⚠️ คุณกำลังใช้ค่าที่ต่างจากแพทย์สั่ง (Customized value)</Text>
-          )}
         </View>
 
-        <View style={styles.paramCard}>
-          <Text style={styles.paramCardTitle}>วางขาราบ (Straighten Leg)</Text>
-          <Text style={styles.paramCardSub}>Target extension</Text>
-          <View style={styles.paramRow}>
-            <TouchableOpacity
-              activeOpacity={0.7}
-              style={[styles.paramBtn, atMinExtension && styles.paramBtnDisabled, { borderColor: theme.primary }]}
-              onPress={() => adjustExtension(-5)}
-              disabled={atMinExtension}
-            >
-              <Ionicons name="remove" size={30} color={atMinExtension ? '#9CA3AF' : theme.primary} />
-            </TouchableOpacity>
-            <Text style={[styles.paramValue, { color: theme.primary }]}>{targetExtension}°</Text>
-            <TouchableOpacity
-              activeOpacity={0.7}
-              style={[styles.paramBtn, atMaxExtension && styles.paramBtnDisabled, { borderColor: theme.primary }]}
-              onPress={() => adjustExtension(5)}
-              disabled={atMaxExtension}
-            >
-              <Ionicons name="add" size={30} color={atMaxExtension ? '#9CA3AF' : theme.primary} />
-            </TouchableOpacity>
+        {/* Today's session summary card — 4 GoalChip columns in one row */}
+        {todayStats && (
+          <View style={styles.todayStatsCard}>
+            <View style={styles.todayStatsHeader}>
+              <Ionicons name="today-outline" size={18} color={DSColors.primary} />
+              <Text style={styles.todayStatsTitle}>วันนี้ทำไปแล้ว</Text>
+            </View>
+
+            <View style={styles.todayChipRow}>
+              {/* 1 — Sessions as pips */}
+              <View style={styles.todayChip}>
+                <View style={styles.todayChipIconWrap}>
+                  <Ionicons name="repeat-outline" size={22} color={DSColors.primary} />
+                </View>
+                <Text style={styles.todayChipLabel}>ครั้งที่ทำ</Text>
+                <View style={styles.sessionPipRow}>
+                  {Array.from({ length: todayStats.totalSessionsTarget }, (_, i) => (
+                    <View
+                      key={i}
+                      style={[
+                        styles.sessionPipDot,
+                        i < todayStats.sessionsCompleted ? styles.sessionPipDotDone : styles.sessionPipDotEmpty,
+                      ]}
+                    />
+                  ))}
+                </View>
+              </View>
+
+              <View style={styles.todayChipDivider} />
+
+              {/* 2 — Time */}
+              <View style={styles.todayChip}>
+                <View style={styles.todayChipIconWrap}>
+                  <Ionicons name="time-outline" size={22} color={DSColors.primary} />
+                </View>
+                <Text style={styles.todayChipLabel}>เวลารวม</Text>
+                <Text style={styles.todayChipValue}>{todayStats.totalMinutes} นาที</Text>
+              </View>
+
+              <View style={styles.todayChipDivider} />
+
+              {/* 3 — Max flexion */}
+              <View style={styles.todayChip}>
+                <View style={[styles.todayChipIconWrap, { backgroundColor: DSColors.successLight }]}>
+                  <Ionicons name="trending-up" size={22} color={DSColors.success} />
+                </View>
+                <Text style={styles.todayChipLabel}>มุมสูงสุด</Text>
+                <Text style={[styles.todayChipValue, { color: DSColors.success }]}>{todayStats.maxFlexion}°</Text>
+              </View>
+
+              <View style={styles.todayChipDivider} />
+
+              {/* 4 — Target */}
+              <View style={styles.todayChip}>
+                <View style={styles.todayChipIconWrap}>
+                  <Ionicons name="flag-outline" size={22} color={DSColors.primary} />
+                </View>
+                <Text style={styles.todayChipLabel}>เป้าหมาย</Text>
+                <Text style={styles.todayChipValue}>{todayStats.targetFlexion}°</Text>
+              </View>
+            </View>
           </View>
-          {customExtension && (
-            <Text style={styles.customWarningTag}>⚠️ คุณกำลังใช้ค่าที่ต่างจากแพทย์สั่ง (Customized value)</Text>
-          )}
-        </View>
+        )}
 
+        {/* Parameter cards – label left / [−] value [+] stepper right */}
+
+        {/* Flexion */}
         <View style={styles.paramCard}>
-          <Text style={styles.paramCardTitle}>ความเร็ว (Speed)</Text>
-          <Text style={styles.paramCardSub}>Level 1–5</Text>
           <View style={styles.paramRow}>
-            <TouchableOpacity
-              activeOpacity={0.7}
-              style={[styles.paramBtn, atMinSpeed && styles.paramBtnDisabled, { borderColor: theme.primary }]}
-              onPress={() => adjustSpeed(-1)}
-              disabled={atMinSpeed}
-            >
-              <Ionicons name="remove" size={30} color={atMinSpeed ? '#9CA3AF' : theme.primary} />
-            </TouchableOpacity>
-            <Text style={[styles.paramValue, { color: theme.primary }]}>{targetSpeed}</Text>
-            <TouchableOpacity
-              activeOpacity={0.7}
-              style={[styles.paramBtn, atMaxSpeed && styles.paramBtnDisabled, { borderColor: theme.primary }]}
-              onPress={() => adjustSpeed(1)}
-              disabled={atMaxSpeed}
-            >
-              <Ionicons name="add" size={30} color={atMaxSpeed ? '#9CA3AF' : theme.primary} />
-            </TouchableOpacity>
+            <View style={styles.paramLabelGroup}>
+              <View style={styles.paramIconWrap}>
+                <Ionicons name="trending-up" size={18} color={DSColors.primary} />
+              </View>
+              <View style={styles.paramLabelText}>
+                <Text style={styles.paramCardTitle}>งอเข่า</Text>
+                <Text style={styles.paramCardSub}>เป้าหมายองศาสูงสุด</Text>
+              </View>
+            </View>
+            {/* Centered absolutely so it's always at X-midpoint of the card */}
+            <View style={styles.paramWarnSlot} pointerEvents="none">
+              <View style={[styles.paramWarnInner, { opacity: customFlexion ? 1 : 0 }]}>
+                <View style={styles.paramWarnIconWrap}>
+                  <Ionicons name="alert-circle" size={22} color={DSColors.warning} />
+                </View>
+                <Text style={styles.paramWarnLabel} numberOfLines={1}>ปรับค่า</Text>
+              </View>
+            </View>
+            <View style={styles.paramStepper}>
+              <TouchableOpacity activeOpacity={0.7} style={[styles.paramStepBtn, atMinFlexion && styles.paramStepBtnDisabled]} onPress={() => adjustFlexion(-5)} disabled={atMinFlexion}>
+                <Ionicons name="remove" size={22} color={atMinFlexion ? '#C4C4C4' : DSColors.primary} />
+              </TouchableOpacity>
+              <View style={styles.paramValueArea}>
+                <TextInput style={styles.paramValueInput} value={flexionText} onChangeText={setFlexionText} keyboardType="numeric" selectTextOnFocus maxLength={4} returnKeyType="done"
+                  onBlur={() => { const n = parseInt(flexionText, 10); if (!isNaN(n)) { const c = Math.max(FLEXION_MIN, Math.min(FLEXION_MAX, n)); setTargetFlexion(c); if (!isManualMode && c !== presets.flexionDegree) setIsCustomSettings(true); } else setFlexionText(String(targetFlexion)); }}
+                  onSubmitEditing={() => { const n = parseInt(flexionText, 10); if (!isNaN(n)) { const c = Math.max(FLEXION_MIN, Math.min(FLEXION_MAX, n)); setTargetFlexion(c); if (!isManualMode && c !== presets.flexionDegree) setIsCustomSettings(true); } else setFlexionText(String(targetFlexion)); }}
+                />
+                <Text style={styles.paramUnitText}>°</Text>
+              </View>
+              <TouchableOpacity activeOpacity={0.7} style={[styles.paramStepBtn, atMaxFlexion && styles.paramStepBtnDisabled]} onPress={() => adjustFlexion(5)} disabled={atMaxFlexion}>
+                <Ionicons name="add" size={22} color={atMaxFlexion ? '#C4C4C4' : DSColors.primary} />
+              </TouchableOpacity>
+            </View>
           </View>
-          {customSpeed && (
-            <Text style={styles.customWarningTag}>⚠️ คุณกำลังใช้ค่าที่ต่างจากแพทย์สั่ง (Customized value)</Text>
-          )}
         </View>
 
+        {/* Extension */}
         <View style={styles.paramCard}>
-          <Text style={styles.paramCardTitle}>Safety Force Limit (แรงจำกัด)</Text>
-          <Text style={styles.paramCardSub}>Machine threshold in Newtons</Text>
           <View style={styles.paramRow}>
-            <TouchableOpacity
-              activeOpacity={0.7}
-              style={[styles.paramBtn, atMinForce && styles.paramBtnDisabled, { borderColor: theme.primary }]}
-              onPress={() => adjustForceN(-FORCE_STEP)}
-              disabled={atMinForce}
-            >
-              <Ionicons name="remove" size={30} color={atMinForce ? '#9CA3AF' : theme.primary} />
-            </TouchableOpacity>
-            <Text style={[styles.paramValue, { color: theme.primary }]}>{targetForceN} N</Text>
-            <TouchableOpacity
-              activeOpacity={0.7}
-              style={[styles.paramBtn, atMaxForce && styles.paramBtnDisabled, { borderColor: theme.primary }]}
-              onPress={() => adjustForceN(FORCE_STEP)}
-              disabled={atMaxForce}
-            >
-              <Ionicons name="add" size={30} color={atMaxForce ? '#9CA3AF' : theme.primary} />
-            </TouchableOpacity>
+            <View style={styles.paramLabelGroup}>
+              <View style={styles.paramIconWrap}>
+                <Ionicons name="remove-circle-outline" size={18} color={DSColors.primary} />
+              </View>
+              <View style={styles.paramLabelText}>
+                <Text style={styles.paramCardTitle}>เหยียดขา</Text>
+                <Text style={styles.paramCardSub}>เป้าหมายองศาต่ำสุด</Text>
+              </View>
+            </View>
+            <View style={styles.paramWarnSlot} pointerEvents="none">
+              <View style={[styles.paramWarnInner, { opacity: customExtension ? 1 : 0 }]}>
+                <View style={styles.paramWarnIconWrap}>
+                  <Ionicons name="alert-circle" size={22} color={DSColors.warning} />
+                </View>
+                <Text style={styles.paramWarnLabel} numberOfLines={1}>ปรับค่า</Text>
+              </View>
+            </View>
+            <View style={styles.paramStepper}>
+              <TouchableOpacity activeOpacity={0.7} style={[styles.paramStepBtn, atMinExtension && styles.paramStepBtnDisabled]} onPress={() => adjustExtension(-5)} disabled={atMinExtension}>
+                <Ionicons name="remove" size={22} color={atMinExtension ? '#C4C4C4' : DSColors.primary} />
+              </TouchableOpacity>
+              <View style={styles.paramValueArea}>
+                <TextInput style={styles.paramValueInput} value={extensionText} onChangeText={setExtensionText} keyboardType="numeric" selectTextOnFocus maxLength={4} returnKeyType="done"
+                  onBlur={() => { const n = parseInt(extensionText, 10); if (!isNaN(n)) { const c = Math.max(EXTENSION_MIN, Math.min(EXTENSION_MAX, n)); setTargetExtension(c); if (!isManualMode && c !== presets.extensionDegree) setIsCustomSettings(true); } else setExtensionText(String(targetExtension)); }}
+                  onSubmitEditing={() => { const n = parseInt(extensionText, 10); if (!isNaN(n)) { const c = Math.max(EXTENSION_MIN, Math.min(EXTENSION_MAX, n)); setTargetExtension(c); if (!isManualMode && c !== presets.extensionDegree) setIsCustomSettings(true); } else setExtensionText(String(targetExtension)); }}
+                />
+                <Text style={styles.paramUnitText}>°</Text>
+              </View>
+              <TouchableOpacity activeOpacity={0.7} style={[styles.paramStepBtn, atMaxExtension && styles.paramStepBtnDisabled]} onPress={() => adjustExtension(5)} disabled={atMaxExtension}>
+                <Ionicons name="add" size={22} color={atMaxExtension ? '#C4C4C4' : DSColors.primary} />
+              </TouchableOpacity>
+            </View>
           </View>
-          {customForce && (
-            <Text style={styles.customWarningTag}>⚠️ คุณกำลังใช้ค่าที่ต่างจากแพทย์สั่ง (Customized value)</Text>
-          )}
         </View>
 
-        {/* Pause / Resume */}
-        <TouchableOpacity
-          activeOpacity={0.7}
-          style={isPaused ? styles.resumeButton : styles.pauseButton}
-          onPress={handlePause}
-        >
-          <Ionicons name={isPaused ? 'play' : 'pause'} size={40} color="#FFFFFF" />
-          <Text style={styles.buttonLabel}>
-            {isPaused ? 'ทำต่อ (Resume)' : 'หยุดชั่วคราว'}
-          </Text>
-        </TouchableOpacity>
+        {/* Speed */}
+        <View style={styles.paramCard}>
+          <View style={styles.paramRow}>
+            <View style={styles.paramLabelGroup}>
+              <View style={styles.paramIconWrap}>
+                <Ionicons name="speedometer-outline" size={18} color={DSColors.primary} />
+              </View>
+              <View style={styles.paramLabelText}>
+                <Text style={styles.paramCardTitle}>ความเร็ว</Text>
+                <Text style={styles.paramCardSub}>ระดับ 1–5</Text>
+              </View>
+            </View>
+            <View style={styles.paramWarnSlot} pointerEvents="none">
+              <View style={[styles.paramWarnInner, { opacity: customSpeed ? 1 : 0 }]}>
+                <View style={styles.paramWarnIconWrap}>
+                  <Ionicons name="alert-circle" size={22} color={DSColors.warning} />
+                </View>
+                <Text style={styles.paramWarnLabel} numberOfLines={1}>ปรับค่า</Text>
+              </View>
+            </View>
+            <View style={styles.paramStepper}>
+              <TouchableOpacity activeOpacity={0.7} style={[styles.paramStepBtn, atMinSpeed && styles.paramStepBtnDisabled]} onPress={() => adjustSpeed(-1)} disabled={atMinSpeed}>
+                <Ionicons name="remove" size={22} color={atMinSpeed ? '#C4C4C4' : DSColors.primary} />
+              </TouchableOpacity>
+              <View style={styles.paramValueArea}>
+                <TextInput style={styles.paramValueInput} value={speedText} onChangeText={setSpeedText} keyboardType="numeric" selectTextOnFocus maxLength={1} returnKeyType="done"
+                  onBlur={() => { const n = parseInt(speedText, 10); if (!isNaN(n)) { const c = Math.max(SPEED_MIN, Math.min(SPEED_MAX, n)); setTargetSpeed(c); if (!isManualMode && c !== presets.speed) setIsCustomSettings(true); } else setSpeedText(String(targetSpeed)); }}
+                  onSubmitEditing={() => { const n = parseInt(speedText, 10); if (!isNaN(n)) { const c = Math.max(SPEED_MIN, Math.min(SPEED_MAX, n)); setTargetSpeed(c); if (!isManualMode && c !== presets.speed) setIsCustomSettings(true); } else setSpeedText(String(targetSpeed)); }}
+                />
+                <Text style={styles.paramUnitText}>lv.</Text>
+              </View>
+              <TouchableOpacity activeOpacity={0.7} style={[styles.paramStepBtn, atMaxSpeed && styles.paramStepBtnDisabled]} onPress={() => adjustSpeed(1)} disabled={atMaxSpeed}>
+                <Ionicons name="add" size={22} color={atMaxSpeed ? '#C4C4C4' : DSColors.primary} />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
 
-        {/* Emergency Stop */}
-        <TouchableOpacity activeOpacity={0.7} style={styles.emergencyStopButton} onPress={handleEmergencyStop}>
-          <Ionicons name="stop-circle" size={40} color="#FFFFFF" />
-          <Text style={styles.buttonLabel}>หยุดฉุกเฉิน</Text>
-        </TouchableOpacity>
+        {/* Force Limit */}
+        <View style={styles.paramCard}>
+          <View style={styles.paramRow}>
+            <View style={styles.paramLabelGroup}>
+              <View style={styles.paramIconWrap}>
+                <Ionicons name="shield-checkmark-outline" size={18} color={DSColors.primary} />
+              </View>
+              <View style={styles.paramLabelText}>
+                <Text style={styles.paramCardTitle}>แรงจำกัด</Text>
+                <Text style={styles.paramCardSub}>Safety limit (N)</Text>
+              </View>
+            </View>
+            <View style={styles.paramWarnSlot} pointerEvents="none">
+              <View style={[styles.paramWarnInner, { opacity: customForce ? 1 : 0 }]}>
+                <View style={styles.paramWarnIconWrap}>
+                  <Ionicons name="alert-circle" size={22} color={DSColors.warning} />
+                </View>
+                <Text style={styles.paramWarnLabel} numberOfLines={1}>ปรับค่า</Text>
+              </View>
+            </View>
+            <View style={styles.paramStepper}>
+              <TouchableOpacity activeOpacity={0.7} style={[styles.paramStepBtn, atMinForce && styles.paramStepBtnDisabled]} onPress={() => adjustForceN(-FORCE_STEP)} disabled={atMinForce}>
+                <Ionicons name="remove" size={22} color={atMinForce ? '#C4C4C4' : DSColors.primary} />
+              </TouchableOpacity>
+              <View style={styles.paramValueArea}>
+                <TextInput style={styles.paramValueInput} value={forceText} onChangeText={setForceText} keyboardType="numeric" selectTextOnFocus maxLength={4} returnKeyType="done"
+                  onBlur={() => { const n = parseInt(forceText, 10); if (!isNaN(n)) { const c = Math.max(FORCE_MIN, Math.min(FORCE_MAX, n)); setTargetForceN(c); if (!isManualMode && c !== presets.targetForceN) setIsCustomSettings(true); } else setForceText(String(targetForceN)); }}
+                  onSubmitEditing={() => { const n = parseInt(forceText, 10); if (!isNaN(n)) { const c = Math.max(FORCE_MIN, Math.min(FORCE_MAX, n)); setTargetForceN(c); if (!isManualMode && c !== presets.targetForceN) setIsCustomSettings(true); } else setForceText(String(targetForceN)); }}
+                />
+                <Text style={styles.paramUnitText}>N</Text>
+              </View>
+              <TouchableOpacity activeOpacity={0.7} style={[styles.paramStepBtn, atMaxForce && styles.paramStepBtnDisabled]} onPress={() => adjustForceN(FORCE_STEP)} disabled={atMaxForce}>
+                <Ionicons name="add" size={22} color={atMaxForce ? '#C4C4C4' : DSColors.primary} />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
 
-        <View style={styles.bottomSpacer} />
       </ScrollView>
+
+      {/* ─── Fixed bottom bar ──────────────────────────────────────────────── */}
+      <View style={styles.bottomBar}>
+        {/* Device tracker status strip */}
+        <View style={styles.deviceStatusBar}>
+          <View style={styles.deviceStatusLeft}>
+            <View style={[styles.deviceDot, deviceConnected ? styles.deviceDotOn : styles.deviceDotOff]} />
+            <Text style={[styles.deviceStatusText, { color: deviceConnected ? DSColors.success : DSColors.danger }]}>
+              {deviceConnected ? 'เซ็นเซอร์เชื่อมต่ออยู่' : 'ไม่พบเซ็นเซอร์'}
+            </Text>
+          </View>
+          <View style={styles.deviceStatusRight}>
+            <Text style={[styles.deviceSignalText, {
+              color: signalStrength === 'good' ? DSColors.success : signalStrength === 'fair' ? DSColors.warning : DSColors.danger,
+            }]}>
+              {signalStrength === 'good' ? 'สัญญาณดี' : signalStrength === 'fair' ? 'สัญญาณปานกลาง' : 'สัญญาณอ่อน'}
+            </Text>
+            <Ionicons
+              name={signalStrength === 'good' ? 'cellular' : signalStrength === 'fair' ? 'cellular-outline' : 'wifi-outline'}
+              size={14}
+              color={signalStrength === 'good' ? DSColors.success : signalStrength === 'fair' ? DSColors.warning : DSColors.danger}
+            />
+          </View>
+        </View>
+
+        {/* 3-button action row */}
+        <View style={styles.bottomBtnRow}>
+          {/* Pause / Resume */}
+          <TouchableOpacity
+            activeOpacity={0.75}
+            style={[styles.bottomBtnOutline, isPaused && styles.bottomBtnOutlinePaused]}
+            onPress={handlePause}
+          >
+            <Ionicons name={isPaused ? 'play' : 'pause'} size={20} color={isPaused ? DSColors.success : DSColors.primary} />
+            <Text style={[styles.bottomBtnOutlineLabel, isPaused && { color: DSColors.success }]}>
+              {isPaused ? 'ทำต่อ' : 'หยุดชั่วคราว'}
+            </Text>
+            <Text style={styles.bottomBtnSub}>{isPaused ? 'Resume' : 'Pause'}</Text>
+          </TouchableOpacity>
+
+          {/* Reset */}
+          <TouchableOpacity activeOpacity={0.75} style={styles.bottomBtnOutline} onPress={handleReset}>
+            <Ionicons name="refresh-outline" size={20} color={DSColors.text.secondary} />
+            <Text style={[styles.bottomBtnOutlineLabel, { color: DSColors.text.secondary }]}>เริ่มใหม่</Text>
+            <Text style={styles.bottomBtnSub}>Reset</Text>
+          </TouchableOpacity>
+
+          {/* Finish session */}
+          <TouchableOpacity activeOpacity={0.75} style={styles.bottomBtnFinish} onPress={handleEmergencyStop}>
+            <Ionicons name="checkmark-circle" size={20} color="#FFFFFF" />
+            <Text style={styles.bottomBtnFinishLabel}>เสร็จสิ้นการฝึก</Text>
+            <Text style={[styles.bottomBtnSub, { color: 'rgba(255,255,255,0.75)' }]}>Finish Session</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
     </SafeAreaView>
   );
 }
@@ -794,56 +1066,64 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: DSColors.background,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: DSColors.background,
   },
   loadingText: {
     marginTop: 16,
     fontSize: 16,
-    color: '#6B7280',
+    color: DSColors.text.secondary,
   },
   preparationScroll: {
     padding: 20,
     paddingBottom: 40,
     alignItems: 'center',
-    backgroundColor: '#F8FAFC',
+    backgroundColor: DSColors.background,
   },
-  preparationIconWrap: {
+  kneeImageWrap: {
     width: 140,
     height: 140,
     borderRadius: 70,
-    backgroundColor: '#EFF6FF',
+    backgroundColor: DSColors.primaryLight,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 24,
+    marginBottom: 20,
+    overflow: 'hidden',
+  },
+  kneeImage: {
+    width: 110,
+    height: 110,
   },
   preparationTitle: {
-    fontSize: 28,
+    fontSize: 26,
     fontWeight: '700',
-    color: '#1F2937',
-    marginBottom: 12,
+    color: DSColors.text.primary,
+    marginBottom: 10,
     textAlign: 'center',
   },
   preparationMessage: {
     fontSize: 16,
-    color: '#1F2937',
+    color: DSColors.text.primary,
     textAlign: 'center',
-    marginBottom: 8,
+    marginBottom: 6,
     paddingHorizontal: 16,
   },
   preparationSub: {
     fontSize: 14,
-    color: '#6B7280',
+    color: DSColors.text.secondary,
     textAlign: 'center',
-    marginBottom: 28,
+    marginBottom: 24,
   },
   manualWarningBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 12,
@@ -853,100 +1133,137 @@ const styles = StyleSheet.create({
   manualWarningText: {
     fontSize: 14,
     fontWeight: '600',
-    textAlign: 'center',
+    flex: 1,
   },
   planCard: {
     width: '100%',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
+    backgroundColor: DSColors.surface,
+    borderRadius: DSShape.radiusCard,
     padding: 20,
     marginBottom: 28,
   },
-  planTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#1F2937',
+  planHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     marginBottom: 4,
   },
+  planTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: DSColors.text.primary,
+    flex: 1,
+  },
+  planSessionBadge: {
+    backgroundColor: DSColors.background,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: DSColors.border,
+  },
+  planSessionBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: DSColors.text.secondary,
+  },
+  planSessionDots: {
+    flexDirection: 'row',
+    gap: 6,
+    marginLeft: 30,
+    marginBottom: 8,
+  },
+  planSessionDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  planSessionDotDone: {
+    backgroundColor: DSColors.success,
+  },
+  planSessionDotCurrent: {
+    backgroundColor: DSColors.border,
+    borderWidth: 1.5,
+    borderColor: DSColors.text.secondary,
+  },
+  planSessionDotEmpty: {
+    backgroundColor: DSColors.borderLight,
+    borderWidth: 1,
+    borderColor: DSColors.border,
+  },
   planSubtitle: {
-    fontSize: 14,
+    fontSize: 13,
+    color: DSColors.text.secondary,
     marginBottom: 16,
+    marginLeft: 30,
   },
   planRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 10,
+    paddingVertical: 11,
     borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
+    borderBottomColor: DSColors.borderLight,
+  },
+  planRowLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+  },
+  planIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: DSColors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   planLabel: {
-    fontSize: 16,
-    color: '#6B7280',
+    fontSize: 15,
+    color: DSColors.text.primary,
+    flex: 1,
   },
   planValue: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#1F2937',
+    fontWeight: '700',
+    color: DSColors.primary,
+  },
+  warmUpNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 12,
   },
   planNote: {
     fontSize: 14,
-    color: '#F59E0B',
-    marginTop: 12,
+    color: DSColors.warning,
+    fontWeight: '600',
   },
   startButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#3B82F6',
+    backgroundColor: DSColors.primary,
     padding: 16,
-    borderRadius: 16,
+    borderRadius: DSShape.radiusButton,
     marginVertical: 8,
     width: '100%',
+    minHeight: 56,
   },
   backButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#6B7280',
+    backgroundColor: DSColors.secondary,
     padding: 16,
-    borderRadius: 16,
+    borderRadius: DSShape.radiusButton,
     marginVertical: 8,
     width: '100%',
-  },
-  pauseButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#F59E0B',
-    padding: 16,
-    borderRadius: 16,
-    marginVertical: 8,
-    width: '100%',
-  },
-  resumeButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#10B981',
-    padding: 16,
-    borderRadius: 16,
-    marginVertical: 8,
-    width: '100%',
-  },
-  emergencyStopButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#EF4444',
-    padding: 20,
-    borderRadius: 16,
-    marginVertical: 8,
-    marginTop: 24,
-    width: '100%',
+    minHeight: 56,
   },
   buttonLabel: {
-    color: '#FFFFFF',
+    color: DSColors.text.inverse,
     fontSize: 18,
     fontWeight: 'bold',
     marginLeft: 8,
@@ -957,13 +1274,13 @@ const styles = StyleSheet.create({
   painQuestionTitle: {
     fontSize: 22,
     fontWeight: '700',
-    color: '#1F2937',
+    color: DSColors.text.primary,
     marginBottom: 8,
     textAlign: 'center',
   },
   painQuestionSub: {
     fontSize: 14,
-    color: '#6B7280',
+    color: DSColors.text.secondary,
     marginBottom: 24,
     textAlign: 'center',
   },
@@ -978,14 +1295,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: 20,
-    borderRadius: 16,
-    backgroundColor: '#FFFFFF',
+    borderRadius: DSShape.radiusButton,
+    backgroundColor: DSColors.surface,
     borderWidth: 2,
-    borderColor: '#E5E7EB',
+    borderColor: DSColors.border,
   },
   painLevelBtnSelected: {
-    borderColor: '#3B82F6',
-    backgroundColor: '#EFF6FF',
+    borderColor: DSColors.primary,
+    backgroundColor: DSColors.primaryLight,
   },
   painLevelEmoji: {
     fontSize: 40,
@@ -994,14 +1311,14 @@ const styles = StyleSheet.create({
   painLevelLabel: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#1F2937',
+    color: DSColors.text.primary,
   },
   finishedContainer: {
     flex: 1,
     padding: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F8FAFC',
+    backgroundColor: DSColors.background,
   },
   finishedIconWrap: {
     marginBottom: 24,
@@ -1009,25 +1326,25 @@ const styles = StyleSheet.create({
   finishedTitle: {
     fontSize: 28,
     fontWeight: '700',
-    color: '#1F2937',
+    color: DSColors.text.primary,
     marginBottom: 8,
   },
   finishedSub: {
     fontSize: 16,
-    color: '#6B7280',
+    color: DSColors.text.secondary,
     marginBottom: 32,
   },
   summaryCard: {
     width: '100%',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
+    backgroundColor: DSColors.surface,
+    borderRadius: DSShape.radiusCard,
     padding: 20,
     marginBottom: 32,
   },
   summaryTitle: {
     fontSize: 20,
     fontWeight: '600',
-    color: '#1F2937',
+    color: DSColors.text.primary,
     marginBottom: 16,
   },
   summaryRow: {
@@ -1035,204 +1352,391 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
+    borderBottomColor: DSColors.borderLight,
   },
   summaryLabel: {
     fontSize: 16,
-    color: '#6B7280',
+    color: DSColors.text.secondary,
   },
   summaryValue: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#1F2937',
+    color: DSColors.text.primary,
   },
   scroll: { flex: 1 },
   scrollContent: {
     padding: 20,
     paddingBottom: Platform.OS === 'ios' ? 34 : 24,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: DSColors.background,
   },
-  modeHeader: {
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    borderRadius: 16,
-    marginBottom: 20,
+  // ─── Compact mode chip (row 1) ───────────────────────────────────────────
+  modeChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'center',
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    borderRadius: 999,
     borderWidth: 1,
-  },
-  modeHeaderTitle: {
-    fontSize: 18,
-    fontWeight: '700',
     marginBottom: 4,
   },
-  modeHeaderSub: {
+  modeChipText: {
     fontSize: 14,
-    color: '#6B7280',
+    fontWeight: '600',
   },
-  modeHeaderWarning: {
+  modeChipSep: {
+    width: 1,
+    height: 12,
+    backgroundColor: DSColors.border,
+    marginHorizontal: 2,
+  },
+  modeChipWarn: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: DSColors.warning,
+  },
+  // ─── Status + Force chips row (row 2) ────────────────────────────────────
+  infoChipsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  infoChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  infoChipText: {
     fontSize: 13,
     fontWeight: '600',
-    marginTop: 10,
+  },
+  infoChipPrimary: {
+    backgroundColor: DSColors.primaryLight,
+    borderColor: DSColors.primary + '60',
+  },
+  infoChipSuccess: {
+    backgroundColor: DSColors.successLight,
+    borderColor: DSColors.success + '60',
+  },
+  infoChipWarn: {
+    backgroundColor: DSColors.warningLight,
+    borderColor: DSColors.warning + '60',
   },
   timerSection: {
     alignItems: 'center',
-    paddingVertical: 20,
-  },
-  pausedBadge: {
-    backgroundColor: '#FEF3C7',
-    paddingHorizontal: 16,
     paddingVertical: 8,
-    borderRadius: 12,
-    marginBottom: 12,
-  },
-  pausedBadgeText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#F59E0B',
-  },
-  timerLabel: {
-    fontSize: 16,
-    color: '#6B7280',
     marginBottom: 4,
   },
-  timerValue: {
-    fontSize: 56,
-    fontWeight: '700',
-    color: '#1F2937',
-    letterSpacing: 2,
-  },
-  timerHint: {
-    fontSize: 14,
-    color: '#6B7280',
-    marginTop: 4,
-  },
   warmUpBadge: {
-    backgroundColor: '#FEF3C7',
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderRadius: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#F59E0B',
-  },
-  warmUpText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#F59E0B',
-    textAlign: 'center',
-  },
-  statusBadgeWrap: {
-    marginBottom: 20,
-  },
-  statusBadgeSuccess: {
-    backgroundColor: '#ECFDF5',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#10B981',
-  },
-  statusBadgeRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-  },
-  statusBadgeIcon: {
-    marginRight: 8,
-  },
-  statusBadgeSuccessText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#10B981',
-    textAlign: 'center',
-  },
-  statusBadgeWarning: {
-    backgroundColor: '#FEF3C7',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 16,
+    alignSelf: 'center',
+    gap: 6,
+    backgroundColor: DSColors.warningLight,
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    marginBottom: 10,
     borderWidth: 1,
-    borderColor: '#F59E0B',
+    borderColor: DSColors.warning,
   },
-  statusBadgeWarningText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#F59E0B',
-    textAlign: 'center',
-  },
-  safetyForceBanner: {
-    backgroundColor: '#EFF6FF',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#3B82F6',
-  },
-  safetyForceBannerText: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#1F2937',
-    textAlign: 'center',
-  },
-  paramCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 12,
-  },
-  customWarningTag: {
+  warmUpText: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#F59E0B',
-    marginTop: 10,
+    color: DSColors.warning,
+  },
+  // ─── Today stats card (mirrors home GoalChip style) ─────────────────────
+  todayStatsCard: {
+    backgroundColor: DSColors.surface,
+    borderRadius: DSShape.radiusCard,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: DSColors.borderLight,
+  },
+  todayStatsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  todayStatsTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: DSColors.text.primary,
+  },
+  todayPips: { flexDirection: 'row', gap: 5 },
+  todayPip: { width: 8, height: 8, borderRadius: 4 },
+  todayPipDone: { backgroundColor: DSColors.success },
+  todayPipEmpty: { backgroundColor: '#D1D5DB' },
+  todayPipLabel: { fontSize: 13, fontWeight: '700', color: DSColors.text.secondary },
+  todayChipRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    backgroundColor: DSColors.background,
+    borderRadius: DSShape.radiusButton,
+    paddingVertical: 14,
+    paddingHorizontal: 4,
+  },
+  todayChip: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 2,
+  },
+  todayChipIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: DSColors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 2,
+  },
+  todayChipLabel: {
+    fontSize: 11,
+    color: DSColors.text.secondary,
     textAlign: 'center',
   },
-  paramCardTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#1F2937',
+  todayChipValue: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: DSColors.primary,
+    textAlign: 'center',
   },
-  paramCardSub: {
-    fontSize: 14,
-    color: '#6B7280',
-    marginTop: 4,
-    marginBottom: 16,
+  todayChipDivider: {
+    width: 1,
+    backgroundColor: DSColors.border,
+    marginVertical: 6,
+  },
+  sessionPipRow: {
+    flexDirection: 'row',
+    gap: 5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 20,
+  },
+  sessionPipDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+  },
+  sessionPipDotDone: {
+    backgroundColor: DSColors.success,
+  },
+  sessionPipDotEmpty: {
+    backgroundColor: '#D1D5DB',
+  },
+  paramCard: {
+    backgroundColor: DSColors.surface,
+    borderRadius: DSShape.radiusCard,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    marginBottom: 10,
   },
   paramRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 12,
+    position: 'relative',
   },
-  paramBtn: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: '#EFF6FF',
+  paramLabelGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+    minWidth: 0,
+  },
+  paramLabelText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  paramIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: DSColors.primaryLight,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: '#3B82F6',
+    flexShrink: 0,
   },
-  paramBtnDisabled: {
-    opacity: 0.5,
-    borderColor: '#9CA3AF',
-  },
-  paramValue: {
-    fontSize: 28,
+  paramCardTitle: {
+    fontSize: 16,
     fontWeight: '700',
-    color: '#3B82F6',
+    color: DSColors.text.primary,
   },
-  paramValueWrap: {
+  paramCardSub: {
+    fontSize: 12,
+    color: DSColors.text.secondary,
+    marginTop: 1,
+  },
+  paramStepper: {
     flexDirection: 'row',
-    alignItems: 'baseline',
+    alignItems: 'center',
+    width: 180,       // fixed so [−] and [+] align across all cards
+    flexShrink: 0,
+  },
+  paramStepBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: DSColors.primaryLight,
+    alignItems: 'center',
     justifyContent: 'center',
-    width: '100%',
+    borderWidth: 1.5,
+    borderColor: DSColors.primary,
+    flexShrink: 0,
   },
-  paramUnit: {
-    fontSize: 18,
+  paramStepBtnDisabled: {
+    backgroundColor: DSColors.background,
+    borderColor: '#D1D5DB',
+  },
+  paramValueArea: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 0,           // value and unit hug each other
+  },
+  paramValueInput: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: DSColors.primary,
+    padding: 0,
+    margin: 0,
+    textAlign: 'center',
+    minWidth: 36,
+    includeFontPadding: false,
+  },
+  paramUnitText: {
+    fontSize: 13,
     fontWeight: '600',
-    color: '#6B7280',
-    marginLeft: 4,
+    color: DSColors.text.secondary,
+    marginLeft: 1,
   },
-  bottomSpacer: { height: 24 },
+  paramWarnSlot: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1,
+  },
+  paramWarnInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  paramWarnIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: DSColors.warningLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  paramWarnLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: DSColors.warning,
+  },
+  // ─── Fixed bottom bar ────────────────────────────────────────────────────
+  bottomBar: {
+    backgroundColor: DSColors.surface,
+    borderTopWidth: 1,
+    borderTopColor: DSColors.borderLight,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: Platform.OS === 'ios' ? 28 : 14,
+    gap: 10,
+  },
+  // Device tracker strip
+  deviceStatusBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 4,
+  },
+  deviceStatusLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  deviceDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  deviceDotOn: { backgroundColor: DSColors.success },
+  deviceDotOff: { backgroundColor: DSColors.danger },
+  deviceStatusText: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  deviceStatusRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  deviceSignalText: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  // 3-button action row
+  bottomBtnRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  bottomBtnOutline: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: DSShape.radiusButton,
+    borderWidth: 1.5,
+    borderColor: DSColors.primary,
+    gap: 2,
+    backgroundColor: DSColors.primaryLight,
+  },
+  bottomBtnOutlinePaused: {
+    borderColor: DSColors.success,
+    backgroundColor: DSColors.successLight,
+  },
+  bottomBtnOutlineLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: DSColors.primary,
+    textAlign: 'center',
+  },
+  bottomBtnSub: {
+    fontSize: 10,
+    fontWeight: '400',
+    color: DSColors.text.secondary,
+    textAlign: 'center',
+  },
+  bottomBtnFinish: {
+    flex: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: DSShape.radiusButton,
+    backgroundColor: DSColors.primary,
+    gap: 2,
+  },
+  bottomBtnFinishLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    textAlign: 'center',
+  },
 });

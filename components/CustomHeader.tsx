@@ -5,7 +5,7 @@
  */
 
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { router } from 'expo-router';
 import type { ReactNode } from 'react';
 import { Image, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -22,44 +22,46 @@ export interface CustomHeaderProps {
   appName?: string;
   /** Replace the default right user-badge with a custom element. */
   rightSlot?: ReactNode;
+  /** Override the back action — passed from Stack header fn so it uses screen-level navigation. */
+  onBack?: () => void;
 }
 
 export function CustomHeader({
   showBack = false,
   appName = 'Smart Rehab',
   rightSlot,
+  onBack,
 }: CustomHeaderProps) {
-  const router = useRouter();
   const auth = useAuth();
+
+  const handleBack = onBack ?? (() => router.back());
 
   return (
     <SafeAreaView edges={['top']} style={styles.safeArea}>
       <View style={styles.bar}>
 
-        {/* ── Left: back button OR logo + name ── */}
-        {showBack ? (
-          <Pressable
-            hitSlop={8}
-            onPress={() => router.back()}
-            accessibilityRole="button"
-            accessibilityLabel="ย้อนกลับ"
-            style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}
-          >
-            <Ionicons name="chevron-back" size={26} color={DSColors.primary} />
-            <Text style={styles.backText}>ย้อนกลับ</Text>
-          </Pressable>
-        ) : (
-          <View style={styles.brandBlock}>
-            <View style={styles.logoBadge} accessibilityLabel="โลโก้มหาวิทยาลัยศรีนครินทรวิโรฒ">
-              <Image source={SWU_LOGO} style={styles.logoImage} resizeMode="contain" />
-            </View>
-            <View style={styles.brandText}>
-              <Text numberOfLines={1} style={styles.uniNameTh}>มหาวิทยาลัยศรีนครินทรวิโรฒ</Text>
-              <Text numberOfLines={1} style={styles.uniNameEn}>SRINAKHARINWIROT UNIVERSITY</Text>
-              <Text numberOfLines={1} style={styles.appNameText}>{appName}</Text>
-            </View>
+        {/* ── Left: back + logo (showBack) OR logo only ── */}
+        <View style={styles.brandBlock}>
+          {showBack && (
+            <Pressable
+              hitSlop={10}
+              onPress={handleBack}
+              accessibilityRole="button"
+              accessibilityLabel="ย้อนกลับ"
+              style={({ pressed }) => [styles.backIconBtn, pressed && styles.pressed]}
+            >
+              <Ionicons name="chevron-back" size={26} color={DSColors.primary} />
+            </Pressable>
+          )}
+          <View style={styles.logoBadge} accessibilityLabel="โลโก้มหาวิทยาลัยศรีนครินทรวิโรฒ">
+            <Image source={SWU_LOGO} style={styles.logoImage} resizeMode="contain" />
           </View>
-        )}
+          <View style={styles.brandText}>
+            <Text numberOfLines={1} style={styles.uniNameTh}>มหาวิทยาลัยศรีนครินทรวิโรฒ</Text>
+            <Text numberOfLines={1} style={styles.uniNameEn}>SRINAKHARINWIROT UNIVERSITY</Text>
+            <Text numberOfLines={1} style={styles.appNameText}>{appName}</Text>
+          </View>
+        </View>
 
         {/* ── Right: user badge or custom slot ── */}
         <View style={styles.rightZone}>
@@ -132,18 +134,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
 
-  // Back button
-  backButton: {
-    flexDirection: 'row',
+  // Back icon button (sits to the left of the logo)
+  backIconBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
-    gap: 4,
-    paddingVertical: 6,
-    paddingRight: 12,
-  },
-  backText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: DSColors.primary,
+    justifyContent: 'center',
+    backgroundColor: DSColors.primaryLight,
+    marginRight: 4,
+    flexShrink: 0,
   },
   pressed: {
     opacity: 0.6,

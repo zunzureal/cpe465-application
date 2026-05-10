@@ -45,11 +45,11 @@ function RootContent() {
       <Stack.Screen name="doctor" />
       <Stack.Screen
         name="therapy-session"
-        options={{ header: () => <CustomHeader title="เซสชันกายภาพบำบัด" showBack /> }}
+        options={{ header: () => <CustomHeader showBack /> }}
       />
       <Stack.Screen
         name="manual-setup"
-        options={{ header: () => <CustomHeader title="ตั้งค่าโหมดฝึกอิสระ" showBack /> }}
+        options={{ header: () => <CustomHeader showBack /> }}
       />
       <Stack.Screen
         name="modal"

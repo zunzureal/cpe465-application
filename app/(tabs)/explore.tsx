@@ -10,8 +10,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { useMockDevice } from '@/hooks/useMockDevice';
 import { useAuth } from '@/contexts/AuthContext';
+import { DSColors } from '@/constants/design-system';
 
-const TEAL = '#0B8FAC';
+const TEAL = DSColors.primary;
 
 // Mock
 const MOCK_PATIENT_NAME = 'คุณสมชาย ใจดี';
@@ -61,11 +62,6 @@ export default function SettingsScreen() {
 
   return (
     <View style={[styles.screen, { backgroundColor: bg }]}>
-      <View style={[styles.header, { backgroundColor: isDark ? '#0C2535' : TEAL }]}>
-        <Text style={styles.headerTitle}>ตั้งค่า</Text>
-        <Text style={styles.headerSubtitle}>Settings</Text>
-      </View>
-
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
@@ -197,22 +193,6 @@ export default function SettingsScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  header: {
-    paddingTop: 56,
-    paddingBottom: 24,
-    paddingHorizontal: 24,
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    letterSpacing: 0.3,
-  },
-  headerSubtitle: {
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.85)',
-    marginTop: 4,
-  },
   content: {
     padding: 20,
     paddingBottom: 40,
