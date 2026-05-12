@@ -1,121 +1,259 @@
 /**
- * History (ประวัติ) – Patient-friendly: Progress graph + session cards.
- * Uses react-native-chart-kit for flexion progress (target vs actual).
+ * History (ประวัติ) – Patient-friendly progress screen.
+ * Fully themed to DSColors (University Red / Gray palette).
+ * Session cards use icons for quick scanning.
  */
 
+import { Ionicons } from '@expo/vector-icons';
 import { useMemo } from 'react';
 import { ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { LineChart } from 'react-native-chart-kit';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import {
+  DSColors,
+  DSLayout,
+  DSShadow,
+  DSShape,
+  DSTypography,
+} from '@/constants/design-system';
 
-const TEAL = '#0B8FAC';
-const GREEN = '#22A861';
-const GREEN_BADGE_BG = '#E8F7EF';
-const ORANGE = '#E67E22';
-const ORANGE_BADGE_BG = '#FEF3E2';
-const TARGET_LINE_COLOR = '#7DD3FC'; // light blue
-const ACTUAL_LINE_COLOR = '#22A861'; // green
+// ─── Chart line colors ────────────────────────────────────────────────────────
+const TARGET_LINE_COLOR = '#7DD3FC'; // light-blue dashed target line
+const ACTUAL_LINE_COLOR = DSColors.primary; // University Red for actual progress
 
-// Mock: date/time, achieved flexion, target (from doctor), pain 1=😃 2=😐 3=😫, isManual — 7 days
-const MOCK_SESSIONS = [
-  { id: '1', dateTime: '4 มี.ค. 2568, 09:30', achievedFlexion: 90, targetFlexion: 85, painLevel: 1 as 1 | 2 | 3, isManual: false, dayLabel: 'ศ.' },
-  { id: '2', dateTime: '3 มี.ค. 2568, 14:00', achievedFlexion: 85, targetFlexion: 85, painLevel: 2 as 1 | 2 | 3, isManual: true, dayLabel: 'พฤ.' },
-  { id: '3', dateTime: '2 มี.ค. 2568, 10:15', achievedFlexion: 88, targetFlexion: 85, painLevel: 1 as 1 | 2 | 3, isManual: false, dayLabel: 'พ.' },
-  { id: '4', dateTime: '1 มี.ค. 2568, 16:45', achievedFlexion: 82, targetFlexion: 80, painLevel: 2 as 1 | 2 | 3, isManual: false, dayLabel: 'อ.' },
-  { id: '5', dateTime: '28 ก.พ. 2568, 11:00', achievedFlexion: 80, targetFlexion: 75, painLevel: 1 as 1 | 2 | 3, isManual: true, dayLabel: 'จ.' },
-  { id: '6', dateTime: '27 ก.พ. 2568, 09:00', achievedFlexion: 78, targetFlexion: 75, painLevel: 2 as 1 | 2 | 3, isManual: false, dayLabel: 'อา.' },
-  { id: '7', dateTime: '26 ก.พ. 2568, 15:30', achievedFlexion: 75, targetFlexion: 70, painLevel: 1 as 1 | 2 | 3, isManual: true, dayLabel: 'ส.' },
-];
+const SESSIONS_PER_DAY = 3;
 
-const PAIN_EMOJI: Record<1 | 2 | 3, string> = { 1: '😃', 2: '😐', 3: '😫' };
-
-function sessionsThisWeek() {
-  return MOCK_SESSIONS.length;
+// ─── Mock data — multiple sessions per day ────────────────────────────────────
+interface SessionRecord {
+  id: string;
+  date: string;
+  time: string;
+  sessionNum: number;
+  sessionsPerDay: number;
+  achievedFlexion: number;
+  targetFlexion: number;
+  painLevel: 1 | 2 | 3;
+  isManual: boolean;
+  dayLabel: string;
 }
 
-// Chart config: readable labels, Y 0–150°
-const chartConfig = (labelColor: string, gridColor: string) => ({
-  backgroundColor:  '#FFFFFF',
-  backgroundGradientFrom: '#FFFFFF',
-  backgroundGradientTo: '#FFFFFF',
+const MOCK_SESSIONS: SessionRecord[] = [
+  // 4 มี.ค. — 3/3 ✓
+  { id: '1a', date: '4 มี.ค. 2568', time: '09:30', sessionNum: 1, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 88, targetFlexion: 85, painLevel: 1, isManual: false, dayLabel: 'ศ.' },
+  { id: '1b', date: '4 มี.ค. 2568', time: '12:00', sessionNum: 2, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 89, targetFlexion: 85, painLevel: 1, isManual: false, dayLabel: 'ศ.' },
+  { id: '1c', date: '4 มี.ค. 2568', time: '15:00', sessionNum: 3, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 90, targetFlexion: 85, painLevel: 2, isManual: false, dayLabel: 'ศ.' },
+  // 3 มี.ค. — 2/3
+  { id: '2a', date: '3 มี.ค. 2568', time: '09:00', sessionNum: 1, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 85, targetFlexion: 85, painLevel: 2, isManual: true,  dayLabel: 'พฤ.' },
+  { id: '2b', date: '3 มี.ค. 2568', time: '13:30', sessionNum: 2, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 84, targetFlexion: 85, painLevel: 2, isManual: false, dayLabel: 'พฤ.' },
+  // 2 มี.ค. — 3/3 ✓
+  { id: '3a', date: '2 มี.ค. 2568', time: '10:15', sessionNum: 1, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 86, targetFlexion: 85, painLevel: 1, isManual: false, dayLabel: 'พ.' },
+  { id: '3b', date: '2 มี.ค. 2568', time: '13:00', sessionNum: 2, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 87, targetFlexion: 85, painLevel: 1, isManual: false, dayLabel: 'พ.' },
+  { id: '3c', date: '2 มี.ค. 2568', time: '16:00', sessionNum: 3, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 88, targetFlexion: 85, painLevel: 1, isManual: false, dayLabel: 'พ.' },
+  // 1 มี.ค. — 1/3
+  { id: '4a', date: '1 มี.ค. 2568', time: '16:45', sessionNum: 1, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 82, targetFlexion: 80, painLevel: 2, isManual: false, dayLabel: 'อ.' },
+  // 28 ก.พ. — 3/3 ✓
+  { id: '5a', date: '28 ก.พ. 2568', time: '09:00', sessionNum: 1, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 78, targetFlexion: 75, painLevel: 1, isManual: false, dayLabel: 'จ.' },
+  { id: '5b', date: '28 ก.พ. 2568', time: '12:00', sessionNum: 2, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 79, targetFlexion: 75, painLevel: 1, isManual: true,  dayLabel: 'จ.' },
+  { id: '5c', date: '28 ก.พ. 2568', time: '15:30', sessionNum: 3, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 80, targetFlexion: 75, painLevel: 1, isManual: false, dayLabel: 'จ.' },
+];
+
+// Group sessions by date for display
+interface DayGroup {
+  date: string;
+  dayLabel: string;
+  sessions: SessionRecord[];
+}
+function groupByDay(sessions: SessionRecord[]): DayGroup[] {
+  const map = new Map<string, DayGroup>();
+  for (const s of sessions) {
+    if (!map.has(s.date)) {
+      map.set(s.date, { date: s.date, dayLabel: s.dayLabel, sessions: [] });
+    }
+    map.get(s.date)!.sessions.push(s);
+  }
+  return Array.from(map.values());
+}
+
+const PAIN_CONFIG: Record<1 | 2 | 3, { emoji: string; label: string; color: string }> = {
+  1: { emoji: '😃', label: 'ไม่เจ็บ',  color: DSColors.success },
+  2: { emoji: '😐', label: 'ปานกลาง', color: DSColors.warning },
+  3: { emoji: '😫', label: 'เจ็บมาก', color: DSColors.danger },
+};
+
+// ─── Chart config ─────────────────────────────────────────────────────────────
+const makeChartConfig = (labelColor: string, gridColor: string) => ({
+  backgroundColor: DSColors.surface,
+  backgroundGradientFrom: DSColors.surface,
+  backgroundGradientTo: DSColors.surface,
   decimalPlaces: 0,
-  color: (opacity = 1) => `rgba(0,0,0,${opacity * 0.3})`,
+  color: (opacity = 1) => `rgba(160,0,0,${opacity * 0.25})`, // brand-red tint for grid dots
   labelColor: () => labelColor,
-  style: { borderRadius: 16, paddingRight: 0 },
-  propsForLabels: { fontSize: 14, fontWeight: '600' as const },
-  propsForBackgroundLines: { stroke: gridColor, strokeWidth: 0.5 },
-  fillShadowGradient: '#22A861',
-  fillShadowGradientOpacity: 0.15,
+  style: { borderRadius: 16 },
+  propsForLabels: { fontSize: 13, fontWeight: '600' as const },
+  propsForBackgroundLines: { stroke: gridColor, strokeWidth: 0.6 },
+  fillShadowGradient: DSColors.primary,
+  fillShadowGradientOpacity: 0.08,
 });
 
-export default function HistoryScreen() {
-  const isDark = useColorScheme() === 'dark';
+// ─── Session card component ───────────────────────────────────────────────────
 
-  const bg = isDark ? '#0D1117' : '#F0F6FA';
-  const cardBg = isDark ? '#1C2128' : '#FFFFFF';
-  const textPrimary = isDark ? '#E8EDF2' : '#1A2B3C';
-  const textSecondary = isDark ? '#8FA0B0' : '#6B8099';
-  const borderColor = isDark ? '#2D3945' : '#E5E7EB';
-  const summaryBg = isDark ? '#0D2630' : '#E8F6FA';
-  const gridColor = isDark ? '#2D3945' : '#E5E7EB';
+interface SessionCardProps {
+  time: string;
+  sessionNum: number;
+  sessionsPerDay: number;
+  achievedFlexion: number;
+  targetFlexion: number;
+  painLevel: 1 | 2 | 3;
+  isManual: boolean;
+}
 
-  const count = sessionsThisWeek();
-
-  // Chart data: chronological (oldest first). Last 5–7 sessions.
-  const chartData = useMemo(() => {
-    const reversed = [...MOCK_SESSIONS].reverse();
-    return {
-      labels: reversed.map((s) => s.dayLabel),
-      datasets: [
-        {
-          data: reversed.map((s) => s.targetFlexion),
-          color: (): string => TARGET_LINE_COLOR,
-          strokeWidth: 2,
-          strokeDashArray: [6, 4],
-        },
-        {
-          data: reversed.map((s) => s.achievedFlexion),
-          color: (): string => ACTUAL_LINE_COLOR,
-          strokeWidth: 3,
-        },
-      ],
-    };
-  }, []);
-
-  const { width: screenWidth } = useWindowDimensions();
-  const contentPadding = 24 * 2;
-  const cardPadding = 20 * 2;
-  const chartWidth = Math.max(screenWidth - contentPadding - cardPadding, 200);
-  const chartHeight = Math.max(180, Math.min(220, screenWidth * 0.6));
+function SessionCard({ time, sessionNum, sessionsPerDay, achievedFlexion, targetFlexion, painLevel, isManual }: SessionCardProps) {
+  const exceeded = achievedFlexion >= targetFlexion;
+  const pain = PAIN_CONFIG[painLevel];
 
   return (
-    <View style={[styles.screen, { backgroundColor: bg }]}>
-      <View style={[styles.header, { backgroundColor: isDark ? '#0C2535' : TEAL }]}>
-        <Text style={styles.headerTitle}>ประวัติ</Text>
-        <Text style={styles.headerSubtitle}>History</Text>
+    <View style={styles.card}>
+      {/* Top row: session number + time + mode badge */}
+      <View style={styles.cardTopRow}>
+        <View style={styles.cardDateRow}>
+          <View style={styles.sessionNumBadge}>
+            <Text style={styles.sessionNumText}>ครั้งที่ {sessionNum}</Text>
+          </View>
+          <Ionicons name="time-outline" size={13} color={DSColors.text.secondary} />
+          <Text style={styles.cardDateTime}>{time} น.</Text>
+        </View>
+        <View style={[styles.badge, isManual ? styles.badgeManual : styles.badgeDoctor]}>
+          <Ionicons
+            name={isManual ? 'person-outline' : 'medical-outline'}
+            size={12}
+            color={isManual ? DSColors.warning : DSColors.success}
+          />
+          <Text style={[styles.badgeText, { color: isManual ? DSColors.warning : DSColors.success }]}>
+            {isManual ? 'ฝึกอิสระ' : 'ตามแผนแพทย์'}
+          </Text>
+        </View>
       </View>
 
+      {/* Middle: metric chips */}
+      <View style={styles.metricRow}>
+        {/* Achieved */}
+        <View style={[styles.metricChip, styles.metricChipPrimary]}>
+          <Ionicons name="trending-up" size={18} color={DSColors.primary} />
+          <Text style={styles.metricChipLabel}>ทำได้จริง</Text>
+          <Text style={styles.metricChipValue}>{achievedFlexion}°</Text>
+        </View>
+
+        {/* Divider arrow */}
+        <View style={styles.metricArrow}>
+          <Ionicons
+            name={exceeded ? 'checkmark-circle' : 'arrow-forward'}
+            size={22}
+            color={exceeded ? DSColors.success : DSColors.text.secondary}
+          />
+        </View>
+
+        {/* Target */}
+        <View style={[styles.metricChip, styles.metricChipTarget]}>
+          <Ionicons name="flag-outline" size={18} color={DSColors.text.secondary} />
+          <Text style={styles.metricChipLabel}>เป้าหมาย</Text>
+          <Text style={[styles.metricChipValue, { color: DSColors.text.secondary }]}>{targetFlexion}°</Text>
+        </View>
+      </View>
+
+      {/* Bottom: pain level */}
+      <View style={styles.painRow}>
+        <Ionicons name="pulse-outline" size={16} color={DSColors.text.secondary} />
+        <Text style={styles.painRowLabel}>ความเจ็บปวด</Text>
+        <Text style={styles.painEmoji}>{pain.emoji}</Text>
+        <Text style={[styles.painLevelText, { color: pain.color }]}>{pain.label}</Text>
+      </View>
+    </View>
+  );
+}
+
+// ─── Main screen ──────────────────────────────────────────────────────────────
+
+export default function HistoryScreen() {
+  const { width: screenWidth } = useWindowDimensions();
+
+  const dayGroups = useMemo(() => groupByDay(MOCK_SESSIONS), []);
+
+  // Chart: one point per day (best achieved flexion of the day)
+  const { chartData, yMin, yMax } = useMemo(() => {
+    const reversedGroups = [...dayGroups].reverse();
+    const allValues = MOCK_SESSIONS.flatMap((s) => [s.achievedFlexion, s.targetFlexion]);
+    const computedMin = Math.max(0, Math.floor(Math.min(...allValues) - 5));
+    const computedMax = Math.ceil(Math.max(...allValues) + 5);
+    return {
+      chartData: {
+        labels: reversedGroups.map((g) => g.dayLabel),
+        datasets: [
+          {
+            data: reversedGroups.map((g) => g.sessions[0].targetFlexion),
+            color: (): string => TARGET_LINE_COLOR,
+            strokeWidth: 2,
+            strokeDashArray: [6, 4],
+          },
+          {
+            data: reversedGroups.map((g) => Math.max(...g.sessions.map((s) => s.achievedFlexion))),
+            color: (): string => ACTUAL_LINE_COLOR,
+            strokeWidth: 3,
+          },
+        ],
+      },
+      yMin: computedMin,
+      yMax: computedMax,
+    };
+  }, [dayGroups]);
+
+  const contentPadding = DSLayout.screenPadding * 2;
+  const chartWidth = Math.max(screenWidth - contentPadding - 40, 200);
+  const chartHeight = Math.max(180, Math.min(220, screenWidth * 0.55));
+  const totalSessions = MOCK_SESSIONS.length;
+  const totalDays = dayGroups.length;
+
+  return (
+    <SafeAreaView style={styles.safeArea} edges={['top']}>
       <ScrollView
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        {/* ─── Progress Graph ───────────────────────────────────────────── */}
-        <View style={[styles.chartCard, { backgroundColor: '#FFFFFF', borderColor }]}>
-          <Text style={[styles.chartTitle, { color: textPrimary }]}>
-            กราฟพัฒนาการองศาการงอเข่า (Flexion Progress)
-          </Text>
+
+        {/* ── Summary banner ─────────────────────────────────────────────── */}
+        <View style={[styles.summaryCard, DSShadow]}>
+          <View style={styles.summaryIconWrap}>
+            <Ionicons name="trophy" size={28} color={DSColors.primary} />
+          </View>
+          <View style={styles.summaryTexts}>
+            <Text style={styles.summaryText}>
+              เยี่ยมมาก! ทำ {totalSessions} ครั้ง ใน {totalDays} วันสัปดาห์นี้
+            </Text>
+            <Text style={styles.summarySub}>
+              {totalSessions} sessions across {totalDays} days this week.
+            </Text>
+          </View>
+        </View>
+
+        {/* ── Progress chart ─────────────────────────────────────────────── */}
+        <View style={[styles.chartCard, DSShadow]}>
+          <View style={styles.chartTitleRow}>
+            <Ionicons name="analytics" size={20} color={DSColors.primary} />
+            <Text style={styles.chartTitle}>พัฒนาการการงอเข่า</Text>
+          </View>
+          <Text style={styles.chartSubtitle}>Flexion Progress</Text>
+
           <LineChart
             data={chartData}
             width={chartWidth}
             height={chartHeight}
             yAxisLabel=""
             yAxisSuffix="°"
-            {...({ yAxisMin: 0, yAxisMax: 150, fromZero: true } as Record<string, unknown>)}
+            {...({ yAxisMin: yMin, yAxisMax: yMax, fromZero: false } as Record<string, unknown>)}
             bezier
             withInnerLines
             withOuterLines
-            chartConfig={chartConfig(textSecondary, gridColor)}
+            chartConfig={makeChartConfig(DSColors.text.secondary, DSColors.borderLight)}
             style={styles.chart}
             withDots
             withVerticalLabels
@@ -123,118 +261,154 @@ export default function HistoryScreen() {
             segments={5}
             formatYLabel={(v) => `${v}°`}
           />
+
           <View style={styles.legend}>
             <View style={styles.legendItem}>
-              <View style={[styles.legendLine, { backgroundColor: TARGET_LINE_COLOR }]} />
-              <Text style={[styles.legendText, { color: textPrimary }]}>เป้าหมายจากแพทย์</Text>
+              <View style={[styles.legendDash, { backgroundColor: TARGET_LINE_COLOR }]} />
+              <Text style={styles.legendText}>เป้าหมายแพทย์</Text>
             </View>
             <View style={styles.legendItem}>
               <View style={[styles.legendLine, { backgroundColor: ACTUAL_LINE_COLOR }]} />
-              <Text style={[styles.legendText, { color: textPrimary }]}>ที่คุณทำได้จริง</Text>
+              <Text style={styles.legendText}>ที่คุณทำได้จริง</Text>
             </View>
           </View>
         </View>
 
-        <View style={[styles.summaryCard, { backgroundColor: summaryBg, borderColor }]}>
-          <Text style={[styles.summaryText, { color: textPrimary }]}>
-            เยี่ยมมาก! คุณทำกายภาพไปแล้ว {count} ครั้งในสัปดาห์นี้
-          </Text>
-          <Text style={[styles.summarySub, { color: textSecondary }]}>
-            Great job! You've completed {count} sessions this week.
-          </Text>
+        {/* ── Session list (grouped by day) ──────────────────────────────── */}
+        <View style={styles.sectionHeader}>
+          <Ionicons name="time-outline" size={18} color={DSColors.primary} />
+          <Text style={styles.sectionLabel}>เซสชันที่ผ่านมา</Text>
         </View>
 
-        <Text style={[styles.sectionLabel, { color: textSecondary }]}>เซสชันที่ผ่านมา</Text>
-
-        {MOCK_SESSIONS.map((session) => (
-          <View
-            key={session.id}
-            style={[styles.card, { backgroundColor: cardBg, borderColor }]}
-          >
-            <View style={styles.cardTop}>
-              <Text style={[styles.cardDateTime, { color: textSecondary }]}>
-                {session.dateTime}
-              </Text>
-              <View
-                style={[
-                  styles.badge,
-                  session.isManual
-                    ? { backgroundColor: ORANGE_BADGE_BG }
-                    : { backgroundColor: GREEN_BADGE_BG },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.badgeText,
-                    { color: session.isManual ? ORANGE : GREEN },
-                  ]}
-                >
-                  {session.isManual ? 'ฝึกอิสระ' : 'ตามแผนแพทย์'}
-                </Text>
+        {dayGroups.map((group) => {
+          const completed = group.sessions.length;
+          const perDay = group.sessions[0].sessionsPerDay;
+          const allDone = completed >= perDay;
+          return (
+            <View key={group.date} style={styles.dayGroup}>
+              {/* Day header */}
+              <View style={styles.dayHeader}>
+                <View style={styles.dayHeaderLeft}>
+                  <Ionicons name="calendar-outline" size={15} color={DSColors.text.secondary} />
+                  <Text style={styles.dayHeaderDate}>{group.date}</Text>
+                </View>
+                <View style={styles.dayHeaderRight}>
+                  {Array.from({ length: perDay }, (_, i) => (
+                    <View
+                      key={i}
+                      style={[
+                        styles.dayDot,
+                        i < completed ? styles.dayDotDone : styles.dayDotEmpty,
+                      ]}
+                    />
+                  ))}
+                  <Text style={[styles.dayHeaderCount, allDone && styles.dayHeaderCountDone]}>
+                    {completed}/{perDay}
+                  </Text>
+                </View>
               </View>
+              {/* Session cards for this day */}
+              {group.sessions.map((session) => (
+                <SessionCard
+                  key={session.id}
+                  time={session.time}
+                  sessionNum={session.sessionNum}
+                  sessionsPerDay={session.sessionsPerDay}
+                  achievedFlexion={session.achievedFlexion}
+                  targetFlexion={session.targetFlexion}
+                  painLevel={session.painLevel}
+                  isManual={session.isManual}
+                />
+              ))}
             </View>
-            <Text style={[styles.achievedVsTarget, { color: textPrimary }]}>
-              ทำได้ {session.achievedFlexion}° / เป้าหมาย {session.targetFlexion}°
-            </Text>
-            <View style={styles.painRow}>
-              <Text style={[styles.painLabel, { color: textSecondary }]}>
-                ระดับความเจ็บปวด
-              </Text>
-              <Text style={styles.painEmoji}>{PAIN_EMOJI[session.painLevel]}</Text>
-            </View>
-          </View>
-        ))}
+          );
+        })}
 
         <View style={styles.bottomSpacer} />
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
-  screen: { flex: 1 },
-  header: {
-    paddingTop: 56,
-    paddingBottom: 24,
-    paddingHorizontal: 24,
-  },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    letterSpacing: 0.3,
-  },
-  headerSubtitle: {
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.85)',
-    marginTop: 4,
+  safeArea: {
+    flex: 1,
+    backgroundColor: DSColors.background,
   },
   content: {
-    padding: 24,
+    padding: DSLayout.screenPadding,
     paddingBottom: 40,
   },
-  chartCard: {
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 24,
-    borderWidth: 1,
+
+  // ── Summary banner ──────────────────────────────────────────────────────────
+  summaryCard: {
+    backgroundColor: DSColors.primaryLight,
+    borderRadius: DSShape.radiusCard,
+    padding: DSLayout.cardPadding,
+    marginBottom: DSLayout.sectionGap,
+    flexDirection: 'row',
     alignItems: 'center',
-    overflow: 'hidden',
+    gap: 14,
+    borderWidth: 1,
+    borderColor: DSColors.primary + '30',
+  },
+  summaryIconWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: DSColors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  summaryTexts: { flex: 1 },
+  summaryText: {
+    ...DSTypography.bodyBold,
+    color: DSColors.primaryDark,
+    lineHeight: 22,
+  },
+  summarySub: {
+    ...DSTypography.caption,
+    color: DSColors.primary,
+    marginTop: 2,
+  },
+
+  // ── Chart card ──────────────────────────────────────────────────────────────
+  chartCard: {
+    backgroundColor: DSColors.surface,
+    borderRadius: DSShape.radiusCard,
+    padding: DSLayout.cardPadding,
+    marginBottom: DSLayout.sectionGap,
+    alignItems: 'center',
+  },
+  chartTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 2,
   },
   chartTitle: {
-    fontSize: 18,
-    fontWeight: '700',
+    ...DSTypography.h3,
+    color: DSColors.text.primary,
+  },
+  chartSubtitle: {
+    ...DSTypography.caption,
+    color: DSColors.text.secondary,
     marginBottom: 16,
-    textAlign: 'center',
   },
   chart: {
-    borderRadius: 16,
+    borderRadius: DSShape.radiusButton,
   },
   legend: {
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: 24,
-    marginTop: 16,
+    gap: 20,
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: DSColors.borderLight,
     flexWrap: 'wrap',
   },
   legendItem: {
@@ -247,74 +421,195 @@ const styles = StyleSheet.create({
     height: 4,
     borderRadius: 2,
   },
+  legendDash: {
+    width: 24,
+    height: 4,
+    borderRadius: 2,
+    opacity: 0.7,
+  },
   legendText: {
-    fontSize: 15,
-    fontWeight: '600',
+    ...DSTypography.captionBold,
+    color: DSColors.text.secondary,
   },
-  summaryCard: {
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 24,
-    borderWidth: 1,
-  },
-  summaryText: {
-    fontSize: 18,
-    fontWeight: '700',
-    lineHeight: 26,
-  },
-  summarySub: {
-    fontSize: 14,
-    marginTop: 6,
-  },
-  sectionLabel: {
-    fontSize: 15,
-    fontWeight: '600',
+
+  // ── Section header ──────────────────────────────────────────────────────────
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     marginBottom: 12,
   },
-  card: {
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 16,
-    borderWidth: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 3,
+  sectionLabel: {
+    ...DSTypography.bodyBold,
+    color: DSColors.text.primary,
   },
-  cardTop: {
+
+  // ── Session card ────────────────────────────────────────────────────────────
+  card: {
+    backgroundColor: DSColors.surface,
+    borderRadius: DSShape.radiusCard,
+    padding: DSLayout.cardPadding,
+    marginBottom: DSLayout.itemGap,
+    borderWidth: 1,
+    borderColor: DSColors.borderLight,
+    ...({
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.05,
+      shadowRadius: 6,
+      elevation: 2,
+    } as object),
+  },
+  // Day group + header
+  dayGroup: {
+    marginBottom: 16,
+  },
+  dayHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 4,
+    paddingVertical: 8,
+    marginBottom: 6,
+  },
+  dayHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  dayHeaderDate: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: DSColors.text.primary,
+  },
+  dayHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  dayDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+  },
+  dayDotDone: {
+    backgroundColor: DSColors.success,
+  },
+  dayDotEmpty: {
+    backgroundColor: DSColors.borderLight,
+    borderWidth: 1,
+    borderColor: DSColors.border,
+  },
+  dayHeaderCount: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: DSColors.text.secondary,
+    marginLeft: 2,
+  },
+  dayHeaderCountDone: {
+    color: DSColors.success,
+  },
+  // Session number badge
+  sessionNumBadge: {
+    backgroundColor: DSColors.primaryLight,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  sessionNumText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: DSColors.primary,
+  },
+  cardTopRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 14,
+  },
+  cardDateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
   },
   cardDateTime: {
-    fontSize: 14,
+    ...DSTypography.caption,
+    color: DSColors.text.secondary,
   },
   badge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: DSShape.radiusChip,
+  },
+  badgeDoctor: {
+    backgroundColor: DSColors.successLight,
+  },
+  badgeManual: {
+    backgroundColor: DSColors.warningLight,
   },
   badgeText: {
-    fontSize: 13,
+    ...DSTypography.small,
     fontWeight: '700',
   },
-  achievedVsTarget: {
-    fontSize: 20,
-    fontWeight: '700',
-    marginBottom: 12,
+
+  // Metric chips
+  metricRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 14,
+    gap: 8,
   },
+  metricChip: {
+    flex: 1,
+    alignItems: 'center',
+    borderRadius: DSShape.radiusButton,
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    gap: 4,
+  },
+  metricChipPrimary: {
+    backgroundColor: DSColors.primaryLight,
+  },
+  metricChipTarget: {
+    backgroundColor: DSColors.background,
+  },
+  metricChipLabel: {
+    ...DSTypography.small,
+    color: DSColors.text.secondary,
+  },
+  metricChipValue: {
+    ...DSTypography.data,
+    color: DSColors.primary,
+  },
+  metricArrow: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+
+  // Pain row
   painRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: DSColors.borderLight,
   },
-  painLabel: {
-    fontSize: 14,
+  painRowLabel: {
+    ...DSTypography.caption,
+    color: DSColors.text.secondary,
+    flex: 1,
   },
   painEmoji: {
-    fontSize: 28,
+    fontSize: 22,
   },
+  painLevelText: {
+    ...DSTypography.captionBold,
+  },
+
   bottomSpacer: { height: 24 },
 });

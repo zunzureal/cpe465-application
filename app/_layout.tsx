@@ -7,14 +7,12 @@ import 'react-native-reanimated';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { MockDeviceProvider } from '@/hooks/useMockDevice';
 
+import { CustomHeader } from '@/components/CustomHeader';
 import { GluestackUIProvider } from '@/components/ui/gluestack-ui-provider';
-import { PhoneLoginScreen } from '@/components/screens/PhoneLoginScreen';
+import { DSColors } from '@/constants/design-system';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
+import { DevicePairedProvider } from '@/contexts/DevicePairedContext';
 import '@/global.css';
-
-export const unstable_settings = {
-  anchor: '(tabs)',
-};
 
 function RootContent() {
   const auth = useAuth();
@@ -22,29 +20,42 @@ function RootContent() {
   if (auth.isLoading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#10B981" />
+        <ActivityIndicator size="large" color={DSColors.primary} />
       </View>
     );
   }
 
-  if (!auth.isLoggedIn) {
-    return (
-      <PhoneLoginScreen
-        onSuccess={async (phone) => {
-          await auth.login(phone);
-        }}
-      />
-    );
-  }
-
   return (
-    <Stack>
-      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-      <Stack.Screen name="login" options={{ headerShown: false }} />
-      <Stack.Screen name="doctor" options={{ title: 'ภาพรวมแพทย์', headerShown: true }} />
-      <Stack.Screen name="therapy-session" options={{ title: 'เซสชันกายภาพบำบัด', headerShown: true }} />
-      <Stack.Screen name="manual-setup" options={{ title: 'ตั้งค่าโหมดฝึกอิสระ', headerShown: true }} />
-      <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'รับโปรแกรม' }} />
+    <Stack
+      screenOptions={{
+        header: () => <CustomHeader />,
+        headerShown: true,
+        contentStyle: { backgroundColor: DSColors.background },
+      }}
+    >
+      <Stack.Screen name="index" />
+      <Stack.Screen
+        name="patient-login"
+        options={{ header: () => <CustomHeader showBack /> }}
+      />
+      <Stack.Screen
+        name="doctor-login"
+        options={{ header: () => <CustomHeader showBack /> }}
+      />
+      <Stack.Screen name="(tabs)" />
+      <Stack.Screen name="doctor" />
+      <Stack.Screen
+        name="therapy-session"
+        options={{ header: () => <CustomHeader showBack /> }}
+      />
+      <Stack.Screen
+        name="manual-setup"
+        options={{ header: () => <CustomHeader showBack /> }}
+      />
+      <Stack.Screen
+        name="modal"
+        options={{ presentation: 'modal', headerShown: false }}
+      />
     </Stack>
   );
 }
@@ -56,10 +67,12 @@ export default function RootLayout() {
     <GluestackUIProvider mode={colorScheme ?? 'light'}>
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
         <AuthProvider>
-          <MockDeviceProvider>
-            <RootContent />
-            <StatusBar style="auto" />
-          </MockDeviceProvider>
+          <DevicePairedProvider>
+            <MockDeviceProvider>
+              <RootContent />
+              <StatusBar style="dark" />
+            </MockDeviceProvider>
+          </DevicePairedProvider>
         </AuthProvider>
       </ThemeProvider>
     </GluestackUIProvider>
@@ -71,6 +84,6 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#F8FAFC',
+    backgroundColor: DSColors.background,
   },
 });
