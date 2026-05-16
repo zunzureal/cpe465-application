@@ -1,11 +1,13 @@
 /**
  * Doctor Overview Dashboard – Clean, modern, tablet-friendly.
  * Summary cards (Total Patients, Completed Today, Alerts) + patient list with search.
+ * Fetches real patient data from database.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import {
+  ActivityIndicator,
   FlatList,
   Pressable,
   StyleSheet,
@@ -24,40 +26,88 @@ import {
   DSShape,
   DSTypography,
 } from '@/constants/design-system';
+import { useAuth } from '@/contexts/AuthContext';
+import { getDoctorPatients, type DoctorPatient } from '@/services/apiClient';
 
-// ─── Mock data ───────────────────────────────────────────────────────────
-const MOCK_SUMMARY = {
-  totalPatients: 24,
-  completedToday: 8,
-  alerts: 2,
+type Patient = DoctorPatient & {
+  status: string;
+  lastSession?: string;
+  program: string;
 };
-
-const MOCK_PATIENTS = [
-  { id: '1', name: 'คุณสมชาย ใจดี', program: 'เข่าขวา', status: 'กำลังรักษา', lastSession: 'วันนี้ 09:00' },
-  { id: '2', name: 'คุณอารยา พูนสุข', program: 'ข้อไหล่ซ้าย', status: 'รอดำเนินการ', lastSession: 'เมื่อวาน' },
-  { id: '3', name: 'คุณประเสริฐ มั่นคง', program: 'หลังส่วนล่าง', status: 'ครบแล้ว', lastSession: 'วันนี้ 10:30' },
-  { id: '4', name: 'คุณวิภา งามแสง', program: 'เข่าซ้าย', status: 'กำลังรักษา', lastSession: 'วันนี้ 08:00' },
-  { id: '5', name: 'คุณสมศักดิ์ ใจดี', program: 'ข้อมือขวา', status: 'รอดำเนินการ', lastSession: '2 วันก่อน' },
-];
-
-type Patient = (typeof MOCK_PATIENTS)[0];
 
 export function DoctorOverviewDashboard() {
   const [search, setSearch] = useState('');
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const { width } = useWindowDimensions();
+  const { authToken } = useAuth();
   const isTablet = width >= 768;
 
-  const filtered = MOCK_PATIENTS.filter(
+  // Fetch doctor's patients on mount
+  useEffect(() => {
+    if (!authToken) {
+      setError('ไม่มีสิทธิ์เข้าถึง');
+      setIsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoading(true);
+    setError(null);
+
+    getDoctorPatients(authToken)
+      .then((response) => {
+        if (cancelled) return;
+
+        if (!response.success || !response.data?.patients) {
+          setError(response.error || 'ไม่สามารถโหลดรายชื่อผู้ป่วย');
+          setPatients([]);
+          return;
+        }
+
+        // Map database patients to display format
+        const displayPatients: Patient[] = response.data.patients.map((p) => ({
+          ...p,
+          program: 'เข่าขวา', // Default program - in future get from treatment plan
+          status: 'รอดำเนินการ', // Default status - in future calculate from last session
+          lastSession: undefined, // In future fetch from sessions endpoint
+        }));
+
+        setPatients(displayPatients);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          console.error('[DoctorOverviewDashboard] Fetch error:', err);
+          setError('เกิดข้อผิดพลาดในการโหลดข้อมูล');
+          setPatients([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authToken]);
+
+  const filtered = patients.filter(
     (p) =>
       p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.program.toLowerCase().includes(search.toLowerCase())
+      p.hnCode.toLowerCase().includes(search.toLowerCase())
   );
+
+  // Calculate summary stats
+  const totalPatients = patients.length;
+  const completedToday = patients.filter((p) => p.status === 'ครบแล้ว').length;
+  const alerts = patients.filter((p) => p.status === 'แจ้งเตือน').length;
 
   const summaryCards = [
     {
       key: 'total',
       label: 'ผู้ป่วยทั้งหมด',
-      value: MOCK_SUMMARY.totalPatients,
+      value: totalPatients,
       icon: 'people' as const,
       color: DSColors.primary,
       bg: DSColors.primaryLight,
@@ -65,7 +115,7 @@ export function DoctorOverviewDashboard() {
     {
       key: 'completed',
       label: 'ทำครบวันนี้',
-      value: MOCK_SUMMARY.completedToday,
+      value: completedToday,
       icon: 'checkmark-circle' as const,
       color: DSColors.success,
       bg: DSColors.successLight,
@@ -73,12 +123,34 @@ export function DoctorOverviewDashboard() {
     {
       key: 'alerts',
       label: 'แจ้งเตือน',
-      value: MOCK_SUMMARY.alerts,
+      value: alerts,
       icon: 'warning' as const,
       color: DSColors.danger,
       bg: DSColors.dangerLight,
     },
   ];
+
+  if (isLoading) {
+    return (
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <View style={styles.centerContainer}>
+          <ActivityIndicator size="large" color={DSColors.primary} />
+          <Text style={styles.loadingText}>กำลังโหลดรายชื่อผู้ป่วย...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (error) {
+    return (
+      <SafeAreaView style={styles.safeArea} edges={['top']}>
+        <View style={styles.centerContainer}>
+          <Ionicons name="alert-circle-outline" size={52} color={DSColors.danger} />
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -109,7 +181,7 @@ export function DoctorOverviewDashboard() {
             <Ionicons name="search" size={20} color={DSColors.text.secondary} />
             <TextInput
               style={styles.searchInput}
-              placeholder="ค้นหาชื่อหรือโปรแกรม..."
+              placeholder="ค้นหาชื่อหรือรหัสประจำตัว..."
               placeholderTextColor={DSColors.text.secondary}
               value={search}
               onChangeText={setSearch}
@@ -124,15 +196,13 @@ export function DoctorOverviewDashboard() {
           <View style={[styles.listCard, DSShadow]}>
             <FlatList
               data={filtered}
-              keyExtractor={(item) => item.id}
+              keyExtractor={(item) => String(item.id)}
               ListEmptyComponent={
                 <View style={styles.empty}>
                   <Text style={styles.emptyText}>ไม่พบผู้ป่วยที่ตรงกับคำค้น</Text>
                 </View>
               }
-              renderItem={({ item }) => (
-                <PatientRow item={item} />
-              )}
+              renderItem={({ item }) => <PatientRow item={item} />}
               ItemSeparatorComponent={() => <View style={styles.separator} />}
               contentContainerStyle={filtered.length === 0 ? styles.listContentEmpty : undefined}
               scrollEnabled={!isTablet}

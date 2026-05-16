@@ -28,6 +28,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { CircularTimer } from '@/components/ui/CircularTimer';
 import { DSColors, DSShape, DSTypography } from '@/constants/design-system';
 import { useDevicePaired } from '@/contexts/DevicePairedContext';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   sendSessionComplete,
   sendSessionParametersUpdate,
@@ -36,17 +37,15 @@ import {
   sendSessionResume,
   sendStartCommand,
 } from '@/services/deviceService';
+import {
+  getPatientPreset,
+  getPatientTodayStats,
+  submitSession,
+  type TodayStatsResponse,
+  type TreatmentPlanResponse,
+} from '@/services/apiClient';
 
 const IMG_KNEE = require('@/assets/images/knee.png');
-
-// ─── API config ───────────────────────────────────────────────────────────
-// Priority:
-// 1) EXPO_PUBLIC_API_BASE_URL (recommended; supports real device + any env)
-// 2) Platform defaults for local development
-const API_BASE =
-  process.env.EXPO_PUBLIC_API_BASE_URL?.replace(/\/$/, '') ||
-  (Platform.OS === 'android' ? 'http://10.0.2.2:8080' : 'http://localhost:8080');
-const MOCK_PATIENT_ID = 1;
 
 // ─── Types ───────────────────────────────────────────────────────────────
 type SessionState = 'PREPARATION' | 'RUNNING' | 'PAUSED' | 'FINISHED';
@@ -59,15 +58,6 @@ interface TodayStats {
   targetFlexion: number;
 }
 
-/** Set to null to hide the today stats card during dev */
-const DEV_MOCK_TODAY_STATS: TodayStats = {
-  sessionsCompleted: 1,
-  totalSessionsTarget: 3,
-  totalMinutes: 15,
-  maxFlexion: 62,
-  targetFlexion: 65,
-};
-
 /** Machine preset from doctor's dashboard (API). Force in Newtons (N). */
 export interface DoctorPresets {
   flexionDegree: number;
@@ -78,16 +68,6 @@ export interface DoctorPresets {
   useWarmUp: boolean;
   /** Resistance force threshold in Newtons (N) – safety limit from doctor. */
   targetForceN: number;
-}
-
-interface TreatmentPlanApiResponse {
-  id: number;
-  targetFlexion: number;
-  targetExtension: number;
-  speedLevel: number;
-  durationMinutes: number;
-  useWarmup: boolean;
-  targetForceN?: number | null;
 }
 
 /** Alias for treatment/machine preset from API (used by API layer). */
@@ -143,6 +123,7 @@ export interface ActiveTherapySessionProps {
 
 export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySessionProps) {
   const router = useRouter();
+  const { patientId } = useAuth();
   const theme = isManualMode ? THEME_MANUAL : THEME_DOCTOR;
   const { clearDevicePaired, markDevicePaired } = useDevicePaired();
 
@@ -219,26 +200,36 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
       setLoadingPresets(false);
       return;
     }
+
+    if (!patientId) {
+      setPresetError('No patient ID available');
+      setLoadingPresets(false);
+      return;
+    }
+
     let cancelled = false;
-    const url = `${API_BASE}/api/presets/${MOCK_PATIENT_ID}`;
     setLoadingPresets(true);
     setPresetError(null);
-    fetch(url)
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      })
-      .then((data: TreatmentPlanApiResponse) => {
+
+    getPatientPreset(patientId)
+      .then((response) => {
         if (cancelled) return;
-        const presetsFromApi = {
-          ...DEFAULT_PRESETS,
+
+        if (!response.success) {
+          throw new Error(response.error || 'Failed to fetch presets');
+        }
+
+        const data = response.data as TreatmentPlanResponse;
+        const presetsFromApi: DoctorPresets = {
           flexionDegree: Number(data.targetFlexion ?? DEFAULT_PRESETS.flexionDegree),
           extensionDegree: Number(data.targetExtension ?? DEFAULT_PRESETS.extensionDegree),
           speed: Number(data.speedLevel ?? DEFAULT_PRESETS.speed),
+          holdTime: DEFAULT_PRESETS.holdTime,
           durationMinutes: Number(data.durationMinutes ?? DEFAULT_PRESETS.durationMinutes),
           useWarmUp: Boolean(data.useWarmup ?? DEFAULT_PRESETS.useWarmUp),
           targetForceN: typeof data.targetForceN === 'number' ? data.targetForceN : DEFAULT_PRESETS.targetForceN,
         };
+
         setActivePlanId(Number(data.id));
         setDoctorPresets(presetsFromApi);
         setTargetFlexion(presetsFromApi.flexionDegree);
@@ -262,10 +253,11 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
       .finally(() => {
         if (!cancelled) setLoadingPresets(false);
       });
+
     return () => {
       cancelled = true;
     };
-  }, [isManualMode]);
+  }, [isManualMode, patientId]);
 
   // Timer: store in ref, clear in cleanup (unmount or pause). Only run when RUNNING.
   useEffect(() => {
@@ -349,10 +341,25 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
 
   // Fetch today's session summary once on mount
   useEffect(() => {
-    // Use mock during dev; replace with real fetch when API is ready:
-    // fetch(`${API_BASE}/api/sessions/today/${MOCK_PATIENT_ID}`)…
-    setTodayStats(DEV_MOCK_TODAY_STATS);
-  }, []);
+    if (!patientId) {
+      setTodayStats(null);
+      return;
+    }
+
+    getPatientTodayStats(patientId)
+      .then((response) => {
+        if (response.success && response.data) {
+          setTodayStats(response.data as TodayStats);
+        } else {
+          console.warn('[ActiveTherapySession] Failed to fetch today stats:', response.error);
+          setTodayStats(null);
+        }
+      })
+      .catch((err) => {
+        console.warn('[ActiveTherapySession] Today stats fetch error:', err);
+        setTodayStats(null);
+      });
+  }, [patientId]);
 
   // Keep draft text in sync when numeric values change via stepper buttons
   useEffect(() => { setFlexionText(String(targetFlexion)); }, [targetFlexion]);
@@ -566,12 +573,23 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
       );
       return;
     }
+    if (!patientId) {
+      setPostResultStatus('error');
+      Alert.alert(
+        'ส่งผลไม่สำเร็จ',
+        'ไม่มี ID ผู้ป่วย กรุณาเข้าสู่ระบบใหม่',
+        [{ text: 'ตกลง' }]
+      );
+      return;
+    }
+
     setPostResultStatus('pending');
     const completed = timeCompletedRef.current;
     const actualMaxFlexion = maxFlexionRef.current;
     const actualMaxForceN = actualMaxForceNRef.current;
+
     const payload = {
-      patientId: MOCK_PATIENT_ID,
+      patientId,
       planId: activePlanId,
       sessionDate: new Date().toISOString(),
       actualMaxFlexion,
@@ -580,14 +598,14 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
       isCustomUsed: isCustomSettings,
       actualMaxForceN,
     };
+
     try {
-      const res = await fetch(`${API_BASE}/api/sessions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      setPostResultStatus('success');
+      const response = await submitSession(payload);
+      if (response.success) {
+        setPostResultStatus('success');
+      } else {
+        throw new Error(response.error || 'Failed to submit session');
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Network error';
       setPostResultStatus('error');
@@ -597,7 +615,7 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
         [{ text: 'ตกลง' }]
       );
     }
-  }, [painLevel, isCustomSettings, activePlanId]);
+  }, [painLevel, isCustomSettings, activePlanId, patientId]);
 
   // ─── Loading presets ───────────────────────────────────────────────────
   if (loadingPresets) {

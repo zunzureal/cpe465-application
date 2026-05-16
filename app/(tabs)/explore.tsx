@@ -69,9 +69,14 @@ export default function SettingsScreen() {
   const handleContactSupport = () => {};
 
   const handleLogout = async () => {
-    await auth.logout();
-    router.dismissAll();
-    router.replace('/');
+    try {
+      await auth.logout();
+      // Auth state is now cleared. index.tsx will automatically redirect 
+      // when it detects isLoggedIn is false.
+    } catch (err) {
+      console.error('[explore] Logout error:', err);
+      Alert.alert('ออกจากระบบไม่สำเร็จ', 'กรุณาลองอีกครั้ง');
+    }
   };
 
   const handleManualSetup = () => {

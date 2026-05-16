@@ -1,0 +1,235 @@
+/**
+ * Centralized API client for CPE465 backend.
+ * Handles all HTTP requests with proper error handling and configuration.
+ */
+
+import { Platform } from 'react-native';
+
+// Priority:
+// 1) EXPO_PUBLIC_API_BASE_URL (recommended; supports real device + any env)
+// 2) Platform defaults for local development
+export const API_BASE =
+  process.env.EXPO_PUBLIC_API_BASE_URL?.replace(/\/$/, '') ||
+  (Platform.OS === 'android' ? 'http://10.0.2.2:8080' : 'http://localhost:8080');
+
+type FetchOptions = {
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  body?: Record<string, unknown>;
+  headers?: Record<string, string>;
+};
+
+type ApiResponse<T> = {
+  success: boolean;
+  data?: T;
+  error?: string;
+};
+
+/**
+ * Generic fetch wrapper with error handling
+ */
+async function apiCall<T>(
+  endpoint: string,
+  options: FetchOptions = {},
+  authToken?: string
+): Promise<ApiResponse<T>> {
+  const { method = 'GET', body, headers = {} } = options;
+
+  const defaultHeaders: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+  };
+
+  if (authToken) {
+    defaultHeaders['Authorization'] = `Bearer ${authToken}`;
+  }
+
+  try {
+    const response = await fetch(`${API_BASE}${endpoint}`, {
+      method,
+      headers: { ...defaultHeaders, ...headers },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      const errorData = errorText ? JSON.parse(errorText).error || errorText : 'Unknown error';
+      return {
+        success: false,
+        error: `HTTP ${response.status}: ${errorData}`,
+      };
+    }
+
+    const data = await response.json();
+    return { success: true, data };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Network error';
+    return {
+      success: false,
+      error: message,
+    };
+  }
+}
+
+// ─── DOCTOR ENDPOINTS ────────────────────────────────────────────────────
+
+export interface DoctorLoginPayload {
+  email: string;
+  password: string;
+}
+
+export interface DoctorLoginResponse {
+  token: string;
+}
+
+/**
+ * Doctor login with email and password
+ */
+export async function doctorLogin(
+  email: string,
+  password: string
+): Promise<ApiResponse<DoctorLoginResponse>> {
+  return apiCall<DoctorLoginResponse>('/api/auth/login', {
+    method: 'POST',
+    body: { email, password },
+  });
+}
+
+export interface DoctorPatient {
+  id: number;
+  name: string;
+  hnCode: string;
+  age: number;
+  hospitalId: number;
+  primaryDoctorId: number;
+  createdAt: string;
+}
+
+/**
+ * Get all patients for the logged-in doctor
+ */
+export async function getDoctorPatients(
+  authToken: string
+): Promise<ApiResponse<{ patients: DoctorPatient[] }>> {
+  return apiCall<{ patients: DoctorPatient[] }>('/api/patients', {}, authToken);
+}
+
+// ─── PATIENT ENDPOINTS ────────────────────────────────────────────────────
+
+export interface PatientLookupResponse {
+  patientId: number;
+  name: string;
+  hospitalId: number;
+}
+
+/**
+ * Lookup patient by phone number (no auth required)
+ */
+export async function lookupPatientByPhone(
+  phoneNumber: string
+): Promise<ApiResponse<PatientLookupResponse>> {
+  return apiCall<PatientLookupResponse>('/api/patients/lookup', {
+    method: 'POST',
+    body: { phoneNumber },
+  });
+}
+
+export interface TodayStatsResponse {
+  sessionsCompleted: number;
+  totalSessionsTarget: number;
+  totalMinutes: number;
+  maxFlexion: number;
+  targetFlexion: number;
+}
+
+/**
+ * Get today's session statistics for a patient (no auth required)
+ */
+export async function getPatientTodayStats(
+  patientId: number
+): Promise<ApiResponse<TodayStatsResponse>> {
+  return apiCall<TodayStatsResponse>(`/api/patients/${patientId}/today-stats`);
+}
+
+export interface TreatmentPlanResponse {
+  id: number;
+  targetFlexion: number;
+  targetExtension: number;
+  speedLevel: number;
+  durationMinutes: number;
+  useWarmup: boolean;
+  targetForceN?: number | null;
+  forceLevel?: number;
+}
+
+/**
+ * Get the latest active treatment plan preset for a patient (no auth required for now)
+ */
+export async function getPatientPreset(
+  patientId: number
+): Promise<ApiResponse<TreatmentPlanResponse>> {
+  return apiCall<TreatmentPlanResponse>(`/api/presets/${patientId}`);
+}
+
+// ─── SESSION ENDPOINTS ────────────────────────────────────────────────────
+
+export interface SessionSubmitPayload {
+  patientId: number;
+  planId: number;
+  actualMaxFlexion: number;
+  durationCompleted: number;
+  isCustomUsed?: boolean;
+  painLevel?: number | null;
+  actualForceUsed?: number | null;
+  actualMaxForceN?: number | null;
+  sessionDate?: string;
+}
+
+export interface SessionResponse {
+  id: number;
+  patientId: number;
+  planId: number;
+  actualMaxFlexion: number;
+  durationCompleted: number;
+  isCustomUsed: boolean;
+  painLevel?: number | null;
+  actualForceUsed?: number | null;
+  actualMaxForceN?: number | null;
+  sessionDate: string;
+  plan?: {
+    id: number;
+    targetFlexion: number;
+    targetExtension?: number;
+    durationMinutes?: number;
+    status?: string;
+    createdAt?: string;
+  };
+}
+
+/**
+ * Submit a completed therapy session
+ */
+export async function submitSession(
+  payload: SessionSubmitPayload
+): Promise<ApiResponse<SessionResponse>> {
+  return apiCall<SessionResponse>('/api/sessions', {
+    method: 'POST',
+    body: payload,
+  });
+}
+
+/**
+ * Get all sessions for a patient
+ */
+export async function getPatientSessions(
+  patientId: number,
+  options?: { fromDate?: string; toDate?: string; limit?: number }
+): Promise<ApiResponse<SessionResponse[]>> {
+  let url = `/api/sessions/${patientId}`;
+  const params = new URLSearchParams();
+  if (options?.fromDate) params.append('fromDate', options.fromDate);
+  if (options?.toDate) params.append('toDate', options.toDate);
+  if (options?.limit) params.append('limit', String(options.limit));
+  if (params.toString()) url += `?${params.toString()}`;
+
+  return apiCall<SessionResponse[]>(url);
+}

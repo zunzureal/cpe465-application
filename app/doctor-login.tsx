@@ -1,6 +1,6 @@
 /**
- * Doctor login route — Username + Password mock entry.
- * On success, persists the doctor role and routes to the doctor dashboard.
+ * Doctor login route — Email + Password authentication.
+ * On success, persists the doctor role with JWT token and routes to the doctor dashboard.
  */
 
 import { useRouter } from 'expo-router';
@@ -26,8 +26,8 @@ export default function DoctorLoginRoute() {
   return (
     <DoctorLoginScreen
       onBack={() => router.back()}
-      onSuccess={async (username) => {
-        await auth.loginDoctor(username);
+      onSuccess={async (email, password) => {
+        await auth.loginDoctor(email, password);
         router.replace('/doctor');
       }}
     />

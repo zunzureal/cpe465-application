@@ -25,6 +25,30 @@ function RootContent() {
     );
   }
 
+  // When user is not logged in, show minimal navigation (just login + role selection)
+  if (!auth.isLoggedIn) {
+    return (
+      <Stack
+        screenOptions={{
+          header: () => <CustomHeader />,
+          headerShown: true,
+          contentStyle: { backgroundColor: DSColors.background },
+        }}
+      >
+        <Stack.Screen name="index" />
+        <Stack.Screen
+          name="patient-login"
+          options={{ header: () => <CustomHeader showBack /> }}
+        />
+        <Stack.Screen
+          name="doctor-login"
+          options={{ header: () => <CustomHeader showBack /> }}
+        />
+      </Stack>
+    );
+  }
+
+  // When user is logged in, show full app navigation
   return (
     <Stack
       screenOptions={{
@@ -33,15 +57,6 @@ function RootContent() {
         contentStyle: { backgroundColor: DSColors.background },
       }}
     >
-      <Stack.Screen name="index" />
-      <Stack.Screen
-        name="patient-login"
-        options={{ header: () => <CustomHeader showBack /> }}
-      />
-      <Stack.Screen
-        name="doctor-login"
-        options={{ header: () => <CustomHeader showBack /> }}
-      />
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="doctor" />
       <Stack.Screen

@@ -11,7 +11,6 @@ import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -32,21 +31,13 @@ import {
   DSTypography,
 } from '@/constants/design-system';
 import { useMockDeviceConnection } from '@/hooks/useMockDeviceConnection';
-
-// ─── API config ──────────────────────────────────────────────────────────────
-const API_BASE =
-  process.env.EXPO_PUBLIC_API_BASE_URL?.replace(/\/$/, '') ||
-  (Platform.OS === 'android' ? 'http://10.0.2.2:8080' : 'http://localhost:8080');
-const MOCK_PATIENT_ID = 1;
+import { useAuth } from '@/contexts/AuthContext';
+import { getPatientPreset, getPatientTodayStats, type TodayStatsResponse } from '@/services/apiClient';
 
 // MVP only treats knees. Hardcode for now; later swap for plan.bodyPart from API.
 const BODY_PART_TH = 'เข่าขวา';
 const BODY_PART_EN = 'Right Knee';
 
-// ─── Dev mock override ────────────────────────────────────────────────────────
-// Set to `true` to skip the API fetch and display the prescription card
-// immediately (Scenario A), without a running backend.
-// Set to `false` (or leave undefined) to use the live API (Scenario B on failure).
 interface TodayPlan {
   targetFlexion: number;
   durationMinutes: number;
@@ -54,15 +45,6 @@ interface TodayPlan {
   sessionsPerDay: number;
   sessionsCompletedToday: number;
 }
-
-const DEV_MOCK_PLAN: TodayPlan | null = {
-  targetFlexion: 65,
-  durationMinutes: 20,
-  targetForceN: 15,
-  sessionsPerDay: 3,
-  sessionsCompletedToday: 1, // ← เปลี่ยนเป็น 0, 1, 2, หรือ 3 เพื่อทดสอบ
-};
-// ─── ↑ Change DEV_MOCK_PLAN to `null` to test the "No Plan" empty state ──────
 
 type PlanState = 'loading' | 'hasPlan' | 'noPlan';
 
@@ -417,16 +399,10 @@ export function PatientHomeDashboard() {
 
   const [planState, setPlanState] = useState<PlanState>('loading');
   const [todayPlan, setTodayPlan] = useState<TodayPlan | null>(null);
+  const { patientId } = useAuth();
 
   useEffect(() => {
-    // Dev shortcut: if DEV_MOCK_PLAN is set, skip network entirely.
-    if (DEV_MOCK_PLAN !== null) {
-      setTodayPlan(DEV_MOCK_PLAN);
-      setPlanState('hasPlan');
-      return;
-    }
-    // DEV_MOCK_PLAN === null → test the "no plan today" empty state immediately.
-    if (DEV_MOCK_PLAN === null && process.env.NODE_ENV !== 'production') {
+    if (!patientId) {
       setPlanState('noPlan');
       return;
     }
@@ -434,28 +410,42 @@ export function PatientHomeDashboard() {
     let cancelled = false;
     setPlanState('loading');
 
-    fetch(`${API_BASE}/api/presets/${MOCK_PATIENT_ID}`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      })
-      .then((data) => {
+    // Fetch both treatment plan and today's stats in parallel
+    Promise.all([
+      getPatientPreset(patientId),
+      getPatientTodayStats(patientId),
+    ])
+      .then(([presetResponse, statsResponse]) => {
         if (cancelled) return;
+
+        if (!presetResponse.success) {
+          setPlanState('noPlan');
+          return;
+        }
+
+        const preset = presetResponse.data;
+        const stats = statsResponse.success ? (statsResponse.data as TodayStatsResponse) : null;
+
         setTodayPlan({
-          targetFlexion: Number(data.targetFlexion ?? 90),
-          durationMinutes: Number(data.durationMinutes ?? 15),
-          targetForceN: typeof data.targetForceN === 'number' ? data.targetForceN : 10,
-          sessionsPerDay: Number(data.sessionsPerDay ?? 3),
-          sessionsCompletedToday: Number(data.sessionsCompletedToday ?? 0),
+          targetFlexion: Number(preset?.targetFlexion ?? 90),
+          durationMinutes: Number(preset?.durationMinutes ?? 15),
+          targetForceN: typeof preset?.targetForceN === 'number' ? preset.targetForceN : 10,
+          sessionsPerDay: stats?.totalSessionsTarget ?? 3,
+          sessionsCompletedToday: stats?.sessionsCompleted ?? 0,
         });
         setPlanState('hasPlan');
       })
-      .catch(() => {
-        if (!cancelled) setPlanState('noPlan');
+      .catch((err) => {
+        if (!cancelled) {
+          console.warn('[PatientHomeDashboard] Fetch error:', err);
+          setPlanState('noPlan');
+        }
       });
 
-    return () => { cancelled = true; };
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [patientId]);
 
   const renderPlanCard = () => {
     if (planState === 'loading') {

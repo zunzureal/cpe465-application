@@ -5,11 +5,12 @@
  */
 
 import { Ionicons } from '@expo/vector-icons';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { LineChart } from 'react-native-chart-kit';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { getPatientSessions } from '@/services/apiClient';
 import {
   DSColors,
   DSLayout,
@@ -17,6 +18,7 @@ import {
   DSShape,
   DSTypography,
 } from '@/constants/design-system';
+import { useAuth } from '@/contexts/AuthContext';
 
 // ─── Chart line colors ────────────────────────────────────────────────────────
 const TARGET_LINE_COLOR = '#7DD3FC'; // light-blue dashed target line
@@ -38,6 +40,70 @@ interface SessionRecord {
   dayLabel: string;
 }
 
+// Transform API SessionResponse to SessionRecord
+function transformApiSessions(apiSessions: any[]): SessionRecord[] {
+  const dayMap = new Map<string, SessionRecord[]>();
+  
+  apiSessions.forEach((apiSession) => {
+    const sessionDate = new Date(apiSession.sessionDate);
+    const dateStr = sessionDate.toLocaleDateString('th-TH', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    });
+    
+    const timeStr = sessionDate.toLocaleTimeString('th-TH', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    
+    const dayLabel = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'][sessionDate.getDay()];
+    
+    // Normalize painLevel coming from session_logs. Backend may store a broader range
+    // (e.g., 0, 3, 5, 8). Map them into our UI buckets: 1 (no pain), 2 (moderate), 3 (severe).
+    const rawPain = Number(apiSession.painLevel ?? apiSession.pain_level ?? 1);
+    let normalizedPain: 1 | 2 | 3 = 1;
+    if (isNaN(rawPain) || rawPain <= 1) {
+      normalizedPain = 1;
+    } else if (rawPain <= 4) {
+      normalizedPain = 2;
+    } else {
+      normalizedPain = 3;
+    }
+
+    const record: SessionRecord = {
+      id: String(apiSession.id),
+      date: dateStr,
+      time: timeStr,
+      sessionNum: 1,
+      sessionsPerDay: 3,
+      achievedFlexion: apiSession.actualMaxFlexion || 0,
+      targetFlexion: apiSession.plan?.targetFlexion || 0,
+      painLevel: normalizedPain,
+      isManual: apiSession.isCustomUsed || false,
+      dayLabel,
+    };
+    
+    if (!dayMap.has(dateStr)) {
+      dayMap.set(dateStr, []);
+    }
+    dayMap.get(dateStr)!.push(record);
+  });
+
+  // Update session numbers for sessions on the same day
+  const result: SessionRecord[] = [];
+  dayMap.forEach((sessions) => {
+    sessions.forEach((session, index) => {
+      session.sessionNum = index + 1;
+      session.sessionsPerDay = sessions.length;
+      result.push(session);
+    });
+  });
+  
+  return result;
+}
+
+// Keep MOCK_SESSIONS as fallback for development
 const MOCK_SESSIONS: SessionRecord[] = [
   // 4 มี.ค. — 3/3 ✓
   { id: '1a', date: '4 มี.ค. 2568', time: '09:30', sessionNum: 1, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 88, targetFlexion: 85, painLevel: 1, isManual: false, dayLabel: 'ศ.' },
@@ -57,6 +123,10 @@ const MOCK_SESSIONS: SessionRecord[] = [
   { id: '5b', date: '28 ก.พ. 2568', time: '12:00', sessionNum: 2, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 79, targetFlexion: 75, painLevel: 1, isManual: true,  dayLabel: 'จ.' },
   { id: '5c', date: '28 ก.พ. 2568', time: '15:30', sessionNum: 3, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 80, targetFlexion: 75, painLevel: 1, isManual: false, dayLabel: 'จ.' },
 ];
+
+// Hidden flag to force mock data (useful for offline/manual testing).
+// Set environment variable `EXPO_PUBLIC_FORCE_MOCK_SESSIONS=1` to enable.
+const FORCE_MOCK = process.env.EXPO_PUBLIC_FORCE_MOCK_SESSIONS === '1';
 
 // Group sessions by date for display
 interface DayGroup {
@@ -110,7 +180,8 @@ interface SessionCardProps {
 
 function SessionCard({ time, sessionNum, sessionsPerDay, achievedFlexion, targetFlexion, painLevel, isManual }: SessionCardProps) {
   const exceeded = achievedFlexion >= targetFlexion;
-  const pain = PAIN_CONFIG[painLevel];
+  // Ensure we always have a valid pain config (fallback to 1 = 'ไม่เจ็บ')
+  const pain = PAIN_CONFIG[painLevel as 1 | 2 | 3] ?? PAIN_CONFIG[1];
 
   return (
     <View style={styles.card}>
@@ -176,13 +247,59 @@ function SessionCard({ time, sessionNum, sessionsPerDay, achievedFlexion, target
 
 export default function HistoryScreen() {
   const { width: screenWidth } = useWindowDimensions();
+  const auth = useAuth();
+  const [sessions, setSessions] = useState<SessionRecord[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const dayGroups = useMemo(() => groupByDay(MOCK_SESSIONS), []);
+  // Fetch sessions from API when component mounts or patientId changes
+  useEffect(() => {
+    async function loadSessions() {
+      // If developer explicitly requests mock data, skip API and use local mock.
+      if (FORCE_MOCK) {
+        setSessions(MOCK_SESSIONS);
+        setIsLoading(false);
+        return;
+      }
+
+      if (!auth.patientId) {
+        setError('Patient ID not found');
+        setIsLoading(false);
+        return;
+      }
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        const response = await getPatientSessions(auth.patientId);
+        if (response.success && response.data) {
+          const transformed = transformApiSessions(response.data);
+          setSessions(transformed);
+        } else {
+          setError(response.error || 'Failed to fetch sessions');
+          // Fall back to mock data if fetch fails
+          setSessions(MOCK_SESSIONS);
+        }
+      } catch (err) {
+        console.error('Error loading sessions:', err);
+        setError('Failed to load session history');
+        // Fall back to mock data
+        setSessions(MOCK_SESSIONS);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    loadSessions();
+  }, [auth.patientId]);
+
+  const displaySessions = sessions.length > 0 ? sessions : MOCK_SESSIONS;
+  const dayGroups = useMemo(() => groupByDay(displaySessions), [displaySessions]);
 
   // Chart: one point per day (best achieved flexion of the day)
   const { chartData, yMin, yMax } = useMemo(() => {
     const reversedGroups = [...dayGroups].reverse();
-    const allValues = MOCK_SESSIONS.flatMap((s) => [s.achievedFlexion, s.targetFlexion]);
+    const allValues = displaySessions.flatMap((s) => [s.achievedFlexion, s.targetFlexion]);
     const computedMin = Math.max(0, Math.floor(Math.min(...allValues) - 5));
     const computedMax = Math.ceil(Math.max(...allValues) + 5);
     return {
@@ -210,7 +327,7 @@ export default function HistoryScreen() {
   const contentPadding = DSLayout.screenPadding * 2;
   const chartWidth = Math.max(screenWidth - contentPadding - 40, 200);
   const chartHeight = Math.max(180, Math.min(220, screenWidth * 0.55));
-  const totalSessions = MOCK_SESSIONS.length;
+  const totalSessions = displaySessions.length;
   const totalDays = dayGroups.length;
 
   return (

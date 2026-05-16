@@ -31,12 +31,7 @@ export function PhoneLoginScreen({ onSuccess }: PhoneLoginScreenProps) {
 
   const submit = () => {
     if (!canSubmit) return;
-    const cleaned = digits;
-    Alert.alert(
-      'เข้าสู่ระบบ',
-      `เบอร์โทรศัพท์: ${cleaned}\n\n(ในระบบจริง เซิร์ฟเวอร์จะตรวจสอบว่าลงทะเบียนกับคลินิกแล้ว)`,
-      [{ text: 'ตกลง', onPress: () => onSuccess?.(cleaned) }]
-    );
+    onSuccess?.(digits);
   };
 
   const mockLogin = () => onSuccess?.(MOCK_PHONE_BYPASS);

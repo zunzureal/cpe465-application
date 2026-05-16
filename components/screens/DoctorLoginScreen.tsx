@@ -1,10 +1,10 @@
 /**
- * Doctor login — same shell / spacing / card as patient login.
+ * Doctor login — Email + Password authentication with backend.
  */
 
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
-import { Pressable, TextInput, View } from 'react-native';
+import { Alert, Pressable, TextInput, View } from 'react-native';
 
 import {
   LoginBackRow,
@@ -18,21 +18,36 @@ import {
 } from '@/components/screens/LoginScreenShell';
 import { DSColors } from '@/constants/design-system';
 
-const MIN_USER = 3;
+const MIN_EMAIL = 5;
 const MIN_PASS = 4;
 
 export interface DoctorLoginScreenProps {
-  onSuccess?: (username: string) => void;
+  onSuccess?: (email: string, password: string) => Promise<void>;
   onBack?: () => void;
 }
 
 export function DoctorLoginScreen({ onSuccess, onBack }: DoctorLoginScreenProps) {
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   const valid =
-    username.trim().length >= MIN_USER && password.length >= MIN_PASS;
+    email.trim().length >= MIN_EMAIL && password.length >= MIN_PASS;
+
+  const handleLogin = async () => {
+    if (!valid || isLoading) return;
+
+    setIsLoading(true);
+    try {
+      await onSuccess?.(email.trim(), password);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'เข้าสู่ระบบไม่สำเร็จ';
+      Alert.alert('เข้าสู่ระบบล้มเหลว', message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   return (
     <LoginScreenShell
@@ -49,22 +64,24 @@ export function DoctorLoginScreen({ onSuccess, onBack }: DoctorLoginScreenProps)
       <LoginHeading
         titleTh="แพทย์ / นักกายภาพ"
         titleEn="Doctor / Physical therapist"
-        subtitle="กรอกชื่อผู้ใช้และรหัสผ่านที่คลินิกออกให้"
+        subtitle="กรอกอีเมลและรหัสผ่านที่ได้รับจากคลินิก"
       />
 
       <View style={shared.field}>
-        <LoginFieldLabel>ชื่อผู้ใช้</LoginFieldLabel>
+        <LoginFieldLabel>อีเมล</LoginFieldLabel>
         <TextInput
           style={shared.input}
-          value={username}
-          onChangeText={setUsername}
-          placeholder="Username"
+          value={email}
+          onChangeText={setEmail}
+          placeholder="doctor@hospital.com"
           placeholderTextColor={DSColors.text.secondary}
           autoCapitalize="none"
           autoCorrect={false}
-          autoComplete="username"
-          textContentType="username"
-          accessibilityLabel="ชื่อผู้ใช้"
+          autoComplete="email"
+          textContentType="emailAddress"
+          keyboardType="email-address"
+          editable={!isLoading}
+          accessibilityLabel="อีเมล"
         />
       </View>
 
@@ -81,6 +98,7 @@ export function DoctorLoginScreen({ onSuccess, onBack }: DoctorLoginScreenProps)
             autoCapitalize="none"
             autoCorrect={false}
             textContentType="password"
+            editable={!isLoading}
             accessibilityLabel="รหัสผ่าน"
           />
           <Pressable
@@ -89,6 +107,7 @@ export function DoctorLoginScreen({ onSuccess, onBack }: DoctorLoginScreenProps)
             style={shared.eyeButton}
             accessibilityRole="button"
             accessibilityLabel={showPassword ? 'ซ่อนรหัสผ่าน' : 'แสดงรหัสผ่าน'}
+            disabled={isLoading}
           >
             <Ionicons
               name={showPassword ? 'eye-off' : 'eye'}
@@ -100,9 +119,9 @@ export function DoctorLoginScreen({ onSuccess, onBack }: DoctorLoginScreenProps)
       </View>
 
       <LoginPrimaryButton
-        label="เข้าสู่ระบบ"
-        disabled={!valid}
-        onPress={() => valid && onSuccess?.(username.trim())}
+        label={isLoading ? 'กำลังเข้าสู่ระบบ...' : 'เข้าสู่ระบบ'}
+        disabled={!valid || isLoading}
+        onPress={handleLogin}
       />
     </LoginScreenShell>
   );
