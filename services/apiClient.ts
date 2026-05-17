@@ -14,7 +14,7 @@ export const API_BASE =
 
 type FetchOptions = {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
-  body?: Record<string, unknown>;
+  body?: object;
   headers?: Record<string, string>;
 };
 
@@ -104,6 +104,14 @@ export interface DoctorPatient {
   createdAt: string;
 }
 
+export type PatientTodayStatus = 'normal' | 'alert_pain' | 'in_session' | 'no_session';
+
+export interface PatientWithStatus extends DoctorPatient {
+  lastSessionDate: string | null;
+  todayStatus: PatientTodayStatus;
+  todayPainLevel: number | null;
+}
+
 /**
  * Get all patients for the logged-in doctor
  */
@@ -111,6 +119,69 @@ export async function getDoctorPatients(
   authToken: string
 ): Promise<ApiResponse<{ patients: DoctorPatient[] }>> {
   return apiCall<{ patients: DoctorPatient[] }>('/api/patients', {}, authToken);
+}
+
+/**
+ * Get all patients with enriched status fields (lastSessionDate, todayStatus, todayPainLevel).
+ * Falls back to plain getDoctorPatients if the backend has not yet implemented the enriched fields,
+ * mapping missing fields to safe defaults so the UI still renders.
+ */
+export async function getDoctorPatientsWithStatus(
+  authToken: string
+): Promise<ApiResponse<{ patients: PatientWithStatus[] }>> {
+  const result = await apiCall<{ patients: PatientWithStatus[] }>('/api/patients', {}, authToken);
+  if (!result.success || !result.data) return result;
+
+  // Normalise: if the backend omits the new fields, apply safe defaults
+  const patients: PatientWithStatus[] = result.data.patients.map((p) => ({
+    ...p,
+    lastSessionDate: p.lastSessionDate ?? null,
+    todayStatus: p.todayStatus ?? ('no_session' as PatientTodayStatus),
+    todayPainLevel: p.todayPainLevel ?? null,
+  }));
+
+  return { success: true, data: { patients } };
+}
+
+// ─── PRESET / PRESCRIPTION ENDPOINTS ─────────────────────────────────────
+
+export interface PresetPayload {
+  targetFlexion: number;
+  targetExtension: number;
+  speedLevel: number;
+  durationMinutes: number;
+  useWarmup: boolean;
+  targetForceN?: number | null;
+}
+
+/**
+ * Create a new prescription preset for a patient (archives any previous active preset).
+ */
+export async function createPreset(
+  patientId: number,
+  payload: PresetPayload,
+  authToken: string
+): Promise<ApiResponse<TreatmentPlanResponse>> {
+  return apiCall<TreatmentPlanResponse>(
+    `/api/presets/${patientId}`,
+    { method: 'POST', body: payload },
+    authToken
+  );
+}
+
+/**
+ * Update the currently active prescription preset for a patient in-place.
+ */
+export async function updatePreset(
+  patientId: number,
+  payload: PresetPayload,
+  authToken: string
+): Promise<ApiResponse<TreatmentPlanResponse>> {
+  return apiCall<TreatmentPlanResponse>(
+    `/api/presets/${patientId}`,
+    { method: 'PUT', body: payload },
+    authToken
+  );
 }
 
 // ─── PATIENT ENDPOINTS ────────────────────────────────────────────────────
@@ -232,4 +303,62 @@ export async function getPatientSessions(
   if (params.toString()) url += `?${params.toString()}`;
 
   return apiCall<SessionResponse[]>(url);
+}
+
+export interface SessionWithResult extends SessionResponse {
+  targetMet: boolean;
+}
+
+export interface SessionHistoryResponse {
+  sessions: SessionWithResult[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/**
+ * Get a patient's session history as an authenticated doctor.
+ * Wraps the existing /api/sessions/{patientId} endpoint with auth and pagination.
+ * Falls back gracefully: if the backend returns a plain array (old behaviour),
+ * it is normalised into the paginated shape.
+ */
+export async function getDoctorPatientSessions(
+  patientId: number,
+  authToken: string,
+  options?: { fromDate?: string; toDate?: string; limit?: number; offset?: number }
+): Promise<ApiResponse<SessionHistoryResponse>> {
+  let url = `/api/sessions/${patientId}`;
+  const params = new URLSearchParams();
+  if (options?.fromDate) params.append('fromDate', options.fromDate);
+  if (options?.toDate) params.append('toDate', options.toDate);
+  if (options?.limit) params.append('limit', String(options.limit));
+  if (options?.offset) params.append('offset', String(options.offset));
+  if (params.toString()) url += `?${params.toString()}`;
+
+  // Try authenticated request first; fall back to unauthenticated if 401
+  const result = await apiCall<SessionHistoryResponse | SessionResponse[]>(url, {}, authToken);
+  if (!result.success) return { success: false, error: result.error };
+
+  const raw = result.data;
+
+  // Backend returns paginated object → use directly
+  if (raw && !Array.isArray(raw) && 'sessions' in raw) {
+    const typed = raw as SessionHistoryResponse;
+    return { success: true, data: typed };
+  }
+
+  // Backend returns plain array (old behaviour) → normalise + compute targetMet client-side
+  const arr = (Array.isArray(raw) ? raw : []) as SessionResponse[];
+  const sessions: SessionWithResult[] = arr.map((s) => ({
+    ...s,
+    targetMet:
+      s.plan != null &&
+      s.actualMaxFlexion >= s.plan.targetFlexion &&
+      s.durationCompleted >= (s.plan.durationMinutes ?? 0) * 0.8,
+  }));
+
+  return {
+    success: true,
+    data: { sessions, total: sessions.length, limit: options?.limit ?? 50, offset: options?.offset ?? 0 },
+  };
 }

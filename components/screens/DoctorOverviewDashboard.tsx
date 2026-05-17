@@ -17,6 +17,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 
 import {
   DSColors,
@@ -27,24 +28,19 @@ import {
   DSTypography,
 } from '@/constants/design-system';
 import { useAuth } from '@/contexts/AuthContext';
-import { getDoctorPatients, type DoctorPatient } from '@/services/apiClient';
-
-type Patient = DoctorPatient & {
-  status: string;
-  lastSession?: string;
-  program: string;
-};
+import { getDoctorPatientsWithStatus, type PatientWithStatus } from '@/services/apiClient';
+import { PatientStatusBadge } from '@/components/ui/PatientStatusBadge';
 
 export function DoctorOverviewDashboard() {
   const [search, setSearch] = useState('');
-  const [patients, setPatients] = useState<Patient[]>([]);
+  const [patients, setPatients] = useState<PatientWithStatus[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { width } = useWindowDimensions();
   const { authToken } = useAuth();
+  const router = useRouter();
   const isTablet = width >= 768;
 
-  // Fetch doctor's patients on mount
   useEffect(() => {
     if (!authToken) {
       setError('ไม่มีสิทธิ์เข้าถึง');
@@ -56,7 +52,7 @@ export function DoctorOverviewDashboard() {
     setIsLoading(true);
     setError(null);
 
-    getDoctorPatients(authToken)
+    getDoctorPatientsWithStatus(authToken)
       .then((response) => {
         if (cancelled) return;
 
@@ -66,15 +62,7 @@ export function DoctorOverviewDashboard() {
           return;
         }
 
-        // Map database patients to display format
-        const displayPatients: Patient[] = response.data.patients.map((p) => ({
-          ...p,
-          program: 'เข่าขวา', // Default program - in future get from treatment plan
-          status: 'รอดำเนินการ', // Default status - in future calculate from last session
-          lastSession: undefined, // In future fetch from sessions endpoint
-        }));
-
-        setPatients(displayPatients);
+        setPatients(response.data.patients);
       })
       .catch((err) => {
         if (!cancelled) {
@@ -98,10 +86,9 @@ export function DoctorOverviewDashboard() {
       p.hnCode.toLowerCase().includes(search.toLowerCase())
   );
 
-  // Calculate summary stats
   const totalPatients = patients.length;
-  const completedToday = patients.filter((p) => p.status === 'ครบแล้ว').length;
-  const alerts = patients.filter((p) => p.status === 'แจ้งเตือน').length;
+  const completedToday = patients.filter((p) => p.todayStatus === 'normal').length;
+  const alerts = patients.filter((p) => p.todayStatus === 'alert_pain').length;
 
   const summaryCards = [
     {
@@ -202,7 +189,17 @@ export function DoctorOverviewDashboard() {
                   <Text style={styles.emptyText}>ไม่พบผู้ป่วยที่ตรงกับคำค้น</Text>
                 </View>
               }
-              renderItem={({ item }) => <PatientRow item={item} />}
+              renderItem={({ item }) => (
+                <PatientRow
+                  item={item}
+                  onPress={() =>
+                    router.push({
+                      pathname: '/patient/[patientId]',
+                      params: { patientId: item.id },
+                    })
+                  }
+                />
+              )}
               ItemSeparatorComponent={() => <View style={styles.separator} />}
               contentContainerStyle={filtered.length === 0 ? styles.listContentEmpty : undefined}
               scrollEnabled={!isTablet}
@@ -214,28 +211,32 @@ export function DoctorOverviewDashboard() {
   );
 }
 
-function PatientRow({ item }: { item: Patient }) {
-  const statusColor =
-    item.status === 'กำลังรักษา'
-      ? DSColors.primary
-      : item.status === 'ครบแล้ว'
-        ? DSColors.success
-        : DSColors.text.secondary;
+function PatientRow({ item, onPress }: { item: PatientWithStatus; onPress: () => void }) {
+  const lastSessionLabel = item.lastSessionDate
+    ? new Date(item.lastSessionDate).toLocaleDateString('th-TH', {
+        day: 'numeric',
+        month: 'short',
+      })
+    : 'ยังไม่มีประวัติ';
 
   return (
-    <View style={styles.row}>
+    <Pressable
+      style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+      onPress={onPress}
+    >
       <View style={styles.rowAvatar}>
         <Ionicons name="person" size={22} color={DSColors.primary} />
       </View>
       <View style={styles.rowBody}>
         <Text style={styles.rowName}>{item.name}</Text>
-        <Text style={styles.rowProgram}>{item.program}</Text>
-        <Text style={styles.rowLast}>{item.lastSession}</Text>
+        <Text style={styles.rowHn}>{item.hnCode} · อายุ {item.age} ปี</Text>
+        <Text style={styles.rowLast}>ครั้งล่าสุด: {lastSessionLabel}</Text>
       </View>
-      <View style={[styles.statusChip, { backgroundColor: `${statusColor}18` }]}>
-        <Text style={[styles.statusText, { color: statusColor }]}>{item.status}</Text>
+      <View style={styles.rowRight}>
+        <PatientStatusBadge status={item.todayStatus} />
+        <Ionicons name="chevron-forward" size={16} color={DSColors.text.secondary} style={styles.chevron} />
       </View>
-    </View>
+    </Pressable>
   );
 }
 
@@ -243,6 +244,22 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: DSColors.background,
+  },
+  centerContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  loadingText: {
+    ...DSTypography.body,
+    color: DSColors.text.secondary,
+  },
+  errorText: {
+    ...DSTypography.body,
+    color: DSColors.danger,
+    textAlign: 'center',
+    marginHorizontal: 32,
   },
   container: {
     flex: 1,
@@ -349,6 +366,9 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingHorizontal: DSLayout.cardPadding,
   },
+  rowPressed: {
+    backgroundColor: DSColors.background,
+  },
   separator: {
     height: 1,
     backgroundColor: DSColors.borderLight,
@@ -368,7 +388,7 @@ const styles = StyleSheet.create({
     ...DSTypography.bodyBold,
     color: DSColors.text.primary,
   },
-  rowProgram: {
+  rowHn: {
     ...DSTypography.caption,
     color: DSColors.text.secondary,
     marginTop: 2,
@@ -378,12 +398,11 @@ const styles = StyleSheet.create({
     color: DSColors.text.secondary,
     marginTop: 2,
   },
-  statusChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: DSShape.radiusChip,
+  rowRight: {
+    alignItems: 'flex-end',
+    gap: 4,
   },
-  statusText: {
-    ...DSTypography.captionBold,
+  chevron: {
+    marginTop: 2,
   },
 });
