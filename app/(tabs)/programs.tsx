@@ -31,6 +31,7 @@ interface SessionRecord {
   id: string;
   date: string;
   time: string;
+  ts: number;
   sessionNum: number;
   sessionsPerDay: number;
   achievedFlexion: number;
@@ -38,6 +39,38 @@ interface SessionRecord {
   painLevel: 1 | 2 | 3;
   isManual: boolean;
   dayLabel: string;
+  sessionStatus?: 'SUCCESS' | 'CONTINUE' | 'FAILED';
+}
+
+function resolveSessionStatus(apiSession: any): 'SUCCESS' | 'CONTINUE' | 'FAILED' {
+  const storedStatus = String(apiSession.sessionStatus ?? apiSession.status ?? '').toUpperCase();
+  if (storedStatus === 'SUCCESS' || storedStatus === 'CONTINUE' || storedStatus === 'FAILED') {
+    return storedStatus;
+  }
+
+  if (String(apiSession.plan?.status ?? '').toUpperCase() === 'CANCELLED') {
+    return 'FAILED';
+  }
+
+  return Number(apiSession.actualMaxFlexion ?? 0) >= Number(apiSession.plan?.targetFlexion ?? 0)
+    ? 'SUCCESS'
+    : 'CONTINUE';
+}
+
+function resolveDisplaySessionStatus(
+  sessionStatus?: 'SUCCESS' | 'CONTINUE' | 'FAILED',
+  achievedFlexion?: number,
+  targetFlexion?: number,
+): 'SUCCESS' | 'CONTINUE' | 'FAILED' {
+  if (sessionStatus === 'SUCCESS' || sessionStatus === 'CONTINUE' || sessionStatus === 'FAILED') {
+    return sessionStatus;
+  }
+
+  if (achievedFlexion != null && targetFlexion != null) {
+    return achievedFlexion >= targetFlexion ? 'SUCCESS' : 'CONTINUE';
+  }
+
+  return 'CONTINUE';
 }
 
 // Transform API SessionResponse to SessionRecord
@@ -71,10 +104,13 @@ function transformApiSessions(apiSessions: any[]): SessionRecord[] {
       normalizedPain = 3;
     }
 
+    const sessionStatus = resolveSessionStatus(apiSession);
+
     const record: SessionRecord = {
       id: String(apiSession.id),
       date: dateStr,
       time: timeStr,
+      ts: sessionDate.getTime(),
       sessionNum: 1,
       sessionsPerDay: 3,
       achievedFlexion: apiSession.actualMaxFlexion || 0,
@@ -82,6 +118,7 @@ function transformApiSessions(apiSessions: any[]): SessionRecord[] {
       painLevel: normalizedPain,
       isManual: apiSession.isCustomUsed || false,
       dayLabel,
+      sessionStatus,
     };
     
     if (!dayMap.has(dateStr)) {
@@ -93,6 +130,8 @@ function transformApiSessions(apiSessions: any[]): SessionRecord[] {
   // Update session numbers for sessions on the same day
   const result: SessionRecord[] = [];
   dayMap.forEach((sessions) => {
+    // sort by timestamp ascending so session 1 is earliest
+    sessions.sort((a, b) => a.ts - b.ts);
     sessions.forEach((session, index) => {
       session.sessionNum = index + 1;
       session.sessionsPerDay = sessions.length;
@@ -151,6 +190,12 @@ const PAIN_CONFIG: Record<1 | 2 | 3, { emoji: string; label: string; color: stri
   3: { emoji: '😫', label: 'เจ็บมาก', color: DSColors.danger },
 };
 
+const SESSION_STATUS_CONFIG: Record<'SUCCESS' | 'CONTINUE' | 'FAILED', string> = {
+  SUCCESS: DSColors.success,
+  CONTINUE: DSColors.warning,
+  FAILED: DSColors.danger,
+};
+
 // ─── Chart config ─────────────────────────────────────────────────────────────
 const makeChartConfig = (labelColor: string, gridColor: string) => ({
   backgroundColor: DSColors.surface,
@@ -176,12 +221,15 @@ interface SessionCardProps {
   targetFlexion: number;
   painLevel: 1 | 2 | 3;
   isManual: boolean;
+  sessionStatus?: 'SUCCESS' | 'CONTINUE' | 'FAILED';
 }
 
-function SessionCard({ time, sessionNum, sessionsPerDay, achievedFlexion, targetFlexion, painLevel, isManual }: SessionCardProps) {
+function SessionCard({ time, sessionNum, sessionsPerDay, achievedFlexion, targetFlexion, painLevel, isManual, sessionStatus }: SessionCardProps) {
   const exceeded = achievedFlexion >= targetFlexion;
   // Ensure we always have a valid pain config (fallback to 1 = 'ไม่เจ็บ')
   const pain = PAIN_CONFIG[painLevel as 1 | 2 | 3] ?? PAIN_CONFIG[1];
+  const resolvedStatus = resolveDisplaySessionStatus(sessionStatus, achievedFlexion, targetFlexion);
+  const statusColor = SESSION_STATUS_CONFIG[resolvedStatus] ?? DSColors.warning;
 
   return (
     <View style={styles.card}>
@@ -200,8 +248,8 @@ function SessionCard({ time, sessionNum, sessionsPerDay, achievedFlexion, target
             size={12}
             color={isManual ? DSColors.warning : DSColors.success}
           />
-          <Text style={[styles.badgeText, { color: isManual ? DSColors.warning : DSColors.success }]}>
-            {isManual ? 'ฝึกอิสระ' : 'ตามแผนแพทย์'}
+          <Text style={[styles.badgeText, { color: statusColor }]}>
+            {resolvedStatus === 'SUCCESS' ? 'สำเร็จ' : resolvedStatus === 'FAILED' ? 'ล้มเหลว' : 'กำลังดำเนินการ'}
           </Text>
         </View>
       </View>
@@ -410,15 +458,23 @@ export default function HistoryScreen() {
                   <Text style={styles.dayHeaderDate}>{group.date}</Text>
                 </View>
                 <View style={styles.dayHeaderRight}>
-                  {Array.from({ length: perDay }, (_, i) => (
-                    <View
-                      key={i}
-                      style={[
-                        styles.dayDot,
-                        i < completed ? styles.dayDotDone : styles.dayDotEmpty,
-                      ]}
-                    />
-                  ))}
+                  {Array.from({ length: perDay }, (_, i) => {
+                    const sessionForIndex = group.sessions[i];
+                    const dotStatus = resolveDisplaySessionStatus(
+                      sessionForIndex?.sessionStatus,
+                      sessionForIndex?.achievedFlexion,
+                      sessionForIndex?.targetFlexion,
+                    );
+                    const dotStyle = sessionForIndex
+                      ? dotStatus === 'SUCCESS'
+                        ? styles.dayDotDone
+                        : dotStatus === 'FAILED'
+                          ? styles.dayDotFailed
+                          : styles.dayDotInProgress
+                      : styles.dayDotEmpty;
+
+                    return <View key={i} style={[styles.dayDot, dotStyle]} />;
+                  })}
                   <Text style={[styles.dayHeaderCount, allDone && styles.dayHeaderCountDone]}>
                     {completed}/{perDay}
                   </Text>
@@ -435,6 +491,7 @@ export default function HistoryScreen() {
                   targetFlexion={session.targetFlexion}
                   painLevel={session.painLevel}
                   isManual={session.isManual}
+                  sessionStatus={session.sessionStatus}
                 />
               ))}
             </View>
@@ -611,6 +668,12 @@ const styles = StyleSheet.create({
   },
   dayDotDone: {
     backgroundColor: DSColors.success,
+  },
+  dayDotInProgress: {
+    backgroundColor: DSColors.warning,
+  },
+  dayDotFailed: {
+    backgroundColor: DSColors.danger,
   },
   dayDotEmpty: {
     backgroundColor: DSColors.borderLight,

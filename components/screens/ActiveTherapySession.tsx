@@ -37,6 +37,7 @@ import {
   sendSessionResume,
   sendStartCommand,
 } from '@/services/deviceService';
+import { startSession } from '@/services/apiClient';
 import {
   getPatientPreset,
   getPatientTodayStats,
@@ -376,6 +377,19 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
       durationMinutes: presets.durationMinutes,
       isManualMode,
     });
+    // Create a session_log entry immediately with status CONTINUE
+    void (async () => {
+      try {
+        const resp = await startSession({ patientId: Number(patientId), planId: Number(activePlanId), isCustomUsed: isCustomSettings });
+        if (resp && resp.success && patientId) {
+          // refresh today's aggregated stats so UI shows the in-progress session
+          const todayResp = await getPatientTodayStats(patientId);
+          if (todayResp.success && todayResp.data) setTodayStats(todayResp.data as TodayStats);
+        }
+      } catch (e) {
+        // ignore errors — session can still proceed offline
+      }
+    })();
     setSessionState('RUNNING');
     setTimeLeft(presets.durationMinutes * 60);
     setIsWarmingUp(presets.useWarmUp);

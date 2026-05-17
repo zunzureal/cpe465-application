@@ -32,7 +32,13 @@ import {
 } from '@/constants/design-system';
 import { useMockDeviceConnection } from '@/hooks/useMockDeviceConnection';
 import { useAuth } from '@/contexts/AuthContext';
-import { getPatientPreset, getPatientTodayStats, type TodayStatsResponse } from '@/services/apiClient';
+import {
+  getPatientPreset,
+  getPatientSessions,
+  getPatientTodayStats,
+  type SessionResponse,
+  type TodayStatsResponse,
+} from '@/services/apiClient';
 
 // MVP only treats knees. Hardcode for now; later swap for plan.bodyPart from API.
 const BODY_PART_TH = 'เข่าขวา';
@@ -47,6 +53,7 @@ interface TodayPlan {
 }
 
 type PlanState = 'loading' | 'hasPlan' | 'noPlan';
+type SessionStatus = 'SUCCESS' | 'CONTINUE' | 'FAILED';
 
 // ─── Calendar widget ──────────────────────────────────────────────────────────
 
@@ -77,15 +84,16 @@ const SESSIONS_PER_DAY = 3;
 interface DayPlan {
   scheduled: boolean;
   sessionsCompleted: number;
+  sessionStatuses: SessionStatus[];
 }
 const MOCK_WEEKLY_PLAN: Record<string, DayPlan> = {
-  '2026-05-04': { scheduled: true,  sessionsCompleted: 3 },
-  '2026-05-05': { scheduled: true,  sessionsCompleted: 2 },
-  '2026-05-06': { scheduled: true,  sessionsCompleted: 1 },
-  '2026-05-07': { scheduled: true,  sessionsCompleted: 0 },
-  '2026-05-08': { scheduled: true,  sessionsCompleted: 0 },
-  '2026-05-09': { scheduled: false, sessionsCompleted: 0 },
-  '2026-05-10': { scheduled: false, sessionsCompleted: 0 },
+  '2026-05-04': { scheduled: true,  sessionsCompleted: 3, sessionStatuses: ['SUCCESS', 'SUCCESS', 'SUCCESS'] },
+  '2026-05-05': { scheduled: true,  sessionsCompleted: 2, sessionStatuses: ['SUCCESS', 'CONTINUE'] },
+  '2026-05-06': { scheduled: true,  sessionsCompleted: 1, sessionStatuses: ['FAILED'] },
+  '2026-05-07': { scheduled: true,  sessionsCompleted: 0, sessionStatuses: [] },
+  '2026-05-08': { scheduled: true,  sessionsCompleted: 0, sessionStatuses: [] },
+  '2026-05-09': { scheduled: false, sessionsCompleted: 0, sessionStatuses: [] },
+  '2026-05-10': { scheduled: false, sessionsCompleted: 0, sessionStatuses: [] },
 };
 
 const THAI_MONTHS = [
@@ -95,12 +103,72 @@ const THAI_MONTHS = [
 ];
 const DAY_HEADERS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
 
+function toDateKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function buildSessionCountsByDate(sessions: SessionResponse[]): Record<string, number> {
+  return sessions.reduce<Record<string, number>>((acc, session) => {
+    const key = toDateKey(new Date(session.sessionDate));
+    acc[key] = (acc[key] ?? 0) + 1;
+    return acc;
+  }, {});
+}
+
+function buildSessionStatusesByDate(sessions: SessionResponse[]): Record<string, SessionStatus[]> {
+  return sessions.reduce<Record<string, SessionStatus[]>>((acc, session) => {
+    const key = toDateKey(new Date(session.sessionDate));
+    const status =
+      session.sessionStatus === 'SUCCESS' || session.sessionStatus === 'CONTINUE' || session.sessionStatus === 'FAILED'
+        ? session.sessionStatus
+        : session.plan?.status === 'CANCELLED'
+          ? 'FAILED'
+          : session.actualMaxFlexion >= (session.plan?.targetFlexion ?? 0)
+            ? 'SUCCESS'
+            : 'CONTINUE';
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(status);
+    return acc;
+  }, {});
+}
+
+function buildWeeklyPlanFromCounts(
+  sessionCountsByDate: Record<string, number>,
+  sessionStatusesByDate: Record<string, SessionStatus[]>,
+  hasActivePlan: boolean,
+): Record<string, DayPlan> {
+  const today = new Date();
+  const dayOfWeek = today.getDay(); // 0=Sun
+  const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+  const monday = new Date(today);
+  monday.setDate(today.getDate() + mondayOffset);
+
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    const key = toDateKey(d);
+    const completed = sessionCountsByDate[key] ?? 0;
+    const scheduled = completed > 0 || (d >= today && hasActivePlan);
+    return [
+      key,
+      {
+        scheduled,
+        sessionsCompleted: Math.min(completed, SESSIONS_PER_DAY),
+        sessionStatuses: (sessionStatusesByDate[key] ?? []).slice(0, SESSIONS_PER_DAY),
+      },
+    ] as const;
+  }).reduce<Record<string, DayPlan>>((acc, [key, value]) => {
+    acc[key] = value;
+    return acc;
+  }, {});
+}
+
 interface CalendarWidgetProps {
-  sessionCounts: Record<string, number>;
+  sessionStatusesByDate: Record<string, SessionStatus[]>;
   restDays: Set<string>;
 }
 
-function CalendarWidget({ sessionCounts, restDays }: CalendarWidgetProps) {
+function CalendarWidget({ sessionStatusesByDate, restDays }: CalendarWidgetProps) {
   const today = new Date();
   const [display, setDisplay] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
 
@@ -112,7 +180,7 @@ function CalendarWidget({ sessionCounts, restDays }: CalendarWidgetProps) {
   const dateKey = (d: number) =>
     `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 
-  const getCount = (d: number) => sessionCounts[dateKey(d)] ?? 0;
+  const getStatuses = (d: number) => sessionStatusesByDate[dateKey(d)] ?? [];
   const isToday = (d: number) =>
     today.getFullYear() === year && today.getMonth() === month && today.getDate() === d;
   const isFuture = (d: number) => new Date(year, month, d) > today;
@@ -120,9 +188,9 @@ function CalendarWidget({ sessionCounts, restDays }: CalendarWidgetProps) {
 
   // Summary counts for the month header
   const daysWithSessions = Array.from({ length: daysInMonth }, (_, i) => i + 1)
-    .filter(d => getCount(d) > 0).length;
+    .filter(d => getStatuses(d).length > 0).length;
   const totalSessions = Array.from({ length: daysInMonth }, (_, i) => i + 1)
-    .reduce((sum, d) => sum + getCount(d), 0);
+    .reduce((sum, d) => sum + getStatuses(d).length, 0);
 
   const flatCells: (number | null)[] = [
     ...Array(firstDayOfWeek).fill(null),
@@ -141,12 +209,10 @@ function CalendarWidget({ sessionCounts, restDays }: CalendarWidgetProps) {
   const renderDay = (d: number | null, colIdx: number) => {
     if (!d) return <View key={`e-${colIdx}`} style={calStyles.cell} />;
 
-    const count = getCount(d);
+    const statuses = getStatuses(d);
     const todayFlag = isToday(d);
     const future = isFuture(d);
     const restDay = !future && !todayFlag && isRest(d);
-    // past, not rest, not today → show dots (may be 0 = missed)
-    const isPast = !future && !todayFlag;
 
     const numColor = todayFlag
       ? '#FFFFFF'
@@ -177,7 +243,16 @@ function CalendarWidget({ sessionCounts, restDays }: CalendarWidgetProps) {
             {Array.from({ length: SESSIONS_PER_DAY }, (_, i) => (
               <View
                 key={i}
-                style={[calStyles.dot, i < count ? calStyles.dotDone : calStyles.dotEmpty]}
+                style={[
+                  calStyles.dot,
+                  statuses[i] === 'SUCCESS'
+                    ? calStyles.dotDone
+                    : statuses[i] === 'FAILED'
+                      ? calStyles.dotFailed
+                      : statuses[i] === 'CONTINUE'
+                        ? calStyles.dotProgress
+                        : calStyles.dotEmpty,
+                ]}
               />
             ))}
           </View>
@@ -323,15 +398,24 @@ function WeeklyPlanStrip({
                 </View>
               ) : (
                 <View style={weekStyles.plannedPips}>
-                  {Array.from({ length: sessionsPerDay }, (_, i) => (
-                    <View
-                      key={i}
-                      style={[
-                        weekStyles.pip,
-                        i < plan.sessionsCompleted ? weekStyles.pipDone : weekStyles.pipEmpty,
-                      ]}
-                    />
-                  ))}
+                  {Array.from({ length: sessionsPerDay }, (_, i) => {
+                    const status = plan.sessionStatuses[i];
+                    return (
+                      <View
+                        key={i}
+                        style={[
+                          weekStyles.pip,
+                          status === 'SUCCESS'
+                            ? weekStyles.pipDone
+                            : status === 'FAILED'
+                              ? weekStyles.pipFailed
+                              : status === 'CONTINUE'
+                                ? weekStyles.pipProgress
+                                : weekStyles.pipEmpty,
+                        ]}
+                      />
+                    );
+                  })}
                 </View>
               )}
 
@@ -349,6 +433,14 @@ function WeeklyPlanStrip({
         <View style={weekStyles.legendItem}>
           <View style={[weekStyles.pip, weekStyles.pipDone]} />
           <Text style={weekStyles.legendText}>ทำแล้ว</Text>
+        </View>
+        <View style={weekStyles.legendItem}>
+          <View style={[weekStyles.pip, weekStyles.pipProgress]} />
+          <Text style={weekStyles.legendText}>กำลังดำเนินการ</Text>
+        </View>
+        <View style={weekStyles.legendItem}>
+          <View style={[weekStyles.pip, weekStyles.pipFailed]} />
+          <Text style={weekStyles.legendText}>ล้มเหลว</Text>
         </View>
         <View style={weekStyles.legendItem}>
           <View style={[weekStyles.pip, weekStyles.pipPlanned]} />
@@ -399,27 +491,37 @@ export function PatientHomeDashboard() {
 
   const [planState, setPlanState] = useState<PlanState>('loading');
   const [todayPlan, setTodayPlan] = useState<TodayPlan | null>(null);
+  const [sessionCountsByDate, setSessionCountsByDate] = useState<Record<string, number>>({});
+  const [sessionStatusesByDate, setSessionStatusesByDate] = useState<Record<string, SessionStatus[]>>({});
+  const [weeklyPlan, setWeeklyPlan] = useState<Record<string, DayPlan>>({});
   const { patientId } = useAuth();
 
   useEffect(() => {
     if (!patientId) {
       setPlanState('noPlan');
+      setSessionCountsByDate({});
+      setSessionStatusesByDate({});
+      setWeeklyPlan({});
       return;
     }
 
     let cancelled = false;
     setPlanState('loading');
 
-    // Fetch both treatment plan and today's stats in parallel
+    // Fetch treatment plan, today's stats, and session history in parallel
     Promise.all([
       getPatientPreset(patientId),
       getPatientTodayStats(patientId),
+      getPatientSessions(patientId, { limit: 500 }),
     ])
-      .then(([presetResponse, statsResponse]) => {
+      .then(([presetResponse, statsResponse, sessionsResponse]) => {
         if (cancelled) return;
 
         if (!presetResponse.success) {
           setPlanState('noPlan');
+          setSessionCountsByDate({});
+          setSessionStatusesByDate({});
+          setWeeklyPlan({});
           return;
         }
 
@@ -433,12 +535,31 @@ export function PatientHomeDashboard() {
           sessionsPerDay: stats?.totalSessionsTarget ?? 3,
           sessionsCompletedToday: stats?.sessionsCompleted ?? 0,
         });
+
+        const counts = sessionsResponse.success && sessionsResponse.data
+          ? buildSessionCountsByDate(sessionsResponse.data)
+          : {};
+        const statuses = sessionsResponse.success && sessionsResponse.data
+          ? buildSessionStatusesByDate(sessionsResponse.data)
+          : {};
+        setSessionCountsByDate(counts);
+        setSessionStatusesByDate(statuses);
+        setWeeklyPlan(
+          buildWeeklyPlanFromCounts(
+            counts,
+            statuses,
+            ['ACTIVE', 'IN_PROGRESS'].includes(String((preset as { status?: string } | undefined)?.status ?? '').toUpperCase()),
+          ),
+        );
         setPlanState('hasPlan');
       })
       .catch((err) => {
         if (!cancelled) {
           console.warn('[PatientHomeDashboard] Fetch error:', err);
           setPlanState('noPlan');
+          setSessionCountsByDate({});
+          setSessionStatusesByDate({});
+          setWeeklyPlan({});
         }
       });
 
@@ -481,7 +602,12 @@ export function PatientHomeDashboard() {
 
     // Scenario A — has plan
     const plan = todayPlan!;
-    const nextSession = plan.sessionsCompletedToday + 1;
+    const todayKey = toDateKey(new Date());
+    const todayStatuses = sessionStatusesByDate[todayKey] ?? [];
+    const hasInProgressSessionToday = todayStatuses.includes('CONTINUE');
+    const nextSession = hasInProgressSessionToday
+      ? Math.max(1, plan.sessionsCompletedToday)
+      : plan.sessionsCompletedToday + 1;
     const allDone = plan.sessionsCompletedToday >= plan.sessionsPerDay;
 
     return (
@@ -568,7 +694,9 @@ export function PatientHomeDashboard() {
             </>
           ) : (
             <>
-              <Text style={styles.startSessionCtaText}>เริ่มครั้งที่ {nextSession}</Text>
+              <Text style={styles.startSessionCtaText}>
+                {hasInProgressSessionToday ? `ทำต่อครั้งที่ ${nextSession}` : `เริ่มครั้งที่ ${nextSession}`}
+              </Text>
               <Ionicons name="chevron-forward" size={22} color="#FFFFFF" />
             </>
           )}
@@ -589,14 +717,17 @@ export function PatientHomeDashboard() {
 
         {/* Weekly plan strip */}
         <View style={[styles.card, DSShadow]}>
-          <WeeklyPlanStrip weekPlan={MOCK_WEEKLY_PLAN} sessionsPerDay={SESSIONS_PER_DAY} />
+          <WeeklyPlanStrip
+            weekPlan={weeklyPlan}
+            sessionsPerDay={SESSIONS_PER_DAY}
+          />
         </View>
 
         {/* Calendar progress card */}
         <View style={[styles.card, DSShadow]}>
           <Text style={styles.cardTitle}>ความคืบหน้าการทำกายภาพ</Text>
           <Text style={styles.cardSubtitle}>ปฏิทินแสดงวันที่ทำกายภาพเรียบร้อยแล้ว</Text>
-          <CalendarWidget sessionCounts={MOCK_SESSION_COUNTS} restDays={MOCK_REST_DAYS} />
+          <CalendarWidget sessionStatusesByDate={sessionStatusesByDate} restDays={new Set<string>()} />
         </View>
 
         <View style={styles.bottomSpacer} />
@@ -719,6 +850,12 @@ const calStyles = StyleSheet.create({
   },
   dotDone: {
     backgroundColor: DSColors.success,
+  },
+  dotProgress: {
+    backgroundColor: DSColors.warning,
+  },
+  dotFailed: {
+    backgroundColor: DSColors.danger,
   },
   dotEmpty: {
     backgroundColor: '#E5E7EB',
@@ -1098,6 +1235,12 @@ const weekStyles = StyleSheet.create({
   },
   pipDone: {
     backgroundColor: DSColors.success,
+  },
+  pipProgress: {
+    backgroundColor: DSColors.warning,
+  },
+  pipFailed: {
+    backgroundColor: DSColors.danger,
   },
   pipEmpty: {
     backgroundColor: DSColors.border,

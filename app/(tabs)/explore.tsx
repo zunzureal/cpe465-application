@@ -69,14 +69,33 @@ export default function SettingsScreen() {
   const handleContactSupport = () => {};
 
   const handleLogout = async () => {
-    try {
-      await auth.logout();
-      // Auth state is now cleared. index.tsx will automatically redirect 
-      // when it detects isLoggedIn is false.
-    } catch (err) {
-      console.error('[explore] Logout error:', err);
-      Alert.alert('ออกจากระบบไม่สำเร็จ', 'กรุณาลองอีกครั้ง');
-    }
+    Alert.alert(
+      'ยืนยันการออกจากระบบ',
+      'คุณต้องการออกจากระบบใช่หรือไม่?',
+      [
+        { text: 'ยกเลิก', style: 'cancel' },
+        {
+          text: 'ออกจากระบบ',
+          style: 'destructive',
+          onPress: () => {
+            // Navigate immediately so UI responds quickly, then clear auth in background.
+            try {
+              router.replace('/');
+            } catch (navErr) {
+              console.warn('[explore] router.replace failed', navErr);
+            }
+            void (async () => {
+              try {
+                await auth.logout();
+              } catch (err) {
+                console.error('[explore] Logout error:', err);
+                Alert.alert('ออกจากระบบไม่สำเร็จ', 'กรุณาลองอีกครั้ง');
+              }
+            })();
+          },
+        },
+      ],
+    );
   };
 
   const handleManualSetup = () => {

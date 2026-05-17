@@ -10,6 +10,7 @@ import { Platform } from 'react-native';
 // 2) Platform defaults for local development
 export const API_BASE =
   process.env.EXPO_PUBLIC_API_BASE_URL?.replace(/\/$/, '') ||
+  // Backend in this workspace is usually available at port 8080 for local dev
   (Platform.OS === 'android' ? 'http://10.0.2.2:8080' : 'http://localhost:8080');
 
 type FetchOptions = {
@@ -159,6 +160,7 @@ export interface TreatmentPlanResponse {
   useWarmup: boolean;
   targetForceN?: number | null;
   forceLevel?: number;
+  status?: string;
 }
 
 /**
@@ -195,6 +197,7 @@ export interface SessionResponse {
   actualForceUsed?: number | null;
   actualMaxForceN?: number | null;
   sessionDate: string;
+  sessionStatus?: 'SUCCESS' | 'CONTINUE' | 'FAILED';
   plan?: {
     id: number;
     targetFlexion: number;
@@ -212,6 +215,22 @@ export async function submitSession(
   payload: SessionSubmitPayload
 ): Promise<ApiResponse<SessionResponse>> {
   return apiCall<SessionResponse>('/api/sessions', {
+    method: 'POST',
+    body: payload,
+  });
+}
+
+export interface SessionStartPayload {
+  patientId: number;
+  planId: number;
+  isCustomUsed?: boolean;
+  sessionDate?: string;
+}
+
+export async function startSession(
+  payload: SessionStartPayload
+): Promise<ApiResponse<SessionResponse>> {
+  return apiCall<SessionResponse>('/api/sessions/start', {
     method: 'POST',
     body: payload,
   });
