@@ -15,8 +15,16 @@ import {
   TextInput,
   useWindowDimensions,
   View,
+  Modal,
+  Button,
+  Switch,
+  ScrollView,
 } from 'react-native';
+import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+// Header is provided by the app Stack; do not render it inline here to avoid duplicates.
+import { ThemedText } from '@/components/themed-text';
+import { ThemedView } from '@/components/themed-view';
 
 import {
   DSColors,
@@ -27,7 +35,8 @@ import {
   DSTypography,
 } from '@/constants/design-system';
 import { useAuth } from '@/contexts/AuthContext';
-import { getDoctorPatients, type DoctorPatient } from '@/services/apiClient';
+import { getDoctorPatients, type DoctorPatient, createPatient, putPatientPreset } from '@/services/apiClient';
+import ManagePatientScreen from '@/app/doctor/patient/[id]';
 
 type Patient = DoctorPatient & {
   status: string;
@@ -43,54 +52,94 @@ export function DoctorOverviewDashboard() {
   const { width } = useWindowDimensions();
   const { authToken } = useAuth();
   const isTablet = width >= 768;
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [showManageModal, setShowManageModal] = useState(false);
+  const [managePatientId, setManagePatientId] = useState<number | null>(null);
+  const [newName, setNewName] = useState('');
+  const [newLastName, setNewLastName] = useState('');
+  const [newHn, setNewHn] = useState('');
+  const [newPhone, setNewPhone] = useState('');
+  const [newAge, setNewAge] = useState('');
+  const [newGender, setNewGender] = useState('');
+  const [newSurgeryLocation, setNewSurgeryLocation] = useState('');
+  const [newMachine, setNewMachine] = useState('');
+
+  const router = useRouter();
 
   // Fetch doctor's patients on mount
-  useEffect(() => {
+  async function fetchPatients() {
     if (!authToken) {
       setError('ไม่มีสิทธิ์เข้าถึง');
       setIsLoading(false);
       return;
     }
 
-    let cancelled = false;
     setIsLoading(true);
     setError(null);
 
-    getDoctorPatients(authToken)
-      .then((response) => {
-        if (cancelled) return;
+    try {
+      const response = await getDoctorPatients(authToken);
+      if (!response.success || !response.data?.patients) {
+        setError(response.error || 'ไม่สามารถโหลดรายชื่อผู้ป่วย');
+        setPatients([]);
+        return;
+      }
 
-        if (!response.success || !response.data?.patients) {
-          setError(response.error || 'ไม่สามารถโหลดรายชื่อผู้ป่วย');
-          setPatients([]);
-          return;
-        }
+      const displayPatients: Patient[] = response.data.patients.map((p) => ({
+        ...p,
+        program: 'เข่าขวา',
+        status: 'รอดำเนินการ',
+        lastSession: undefined,
+      }));
 
-        // Map database patients to display format
-        const displayPatients: Patient[] = response.data.patients.map((p) => ({
-          ...p,
-          program: 'เข่าขวา', // Default program - in future get from treatment plan
-          status: 'รอดำเนินการ', // Default status - in future calculate from last session
-          lastSession: undefined, // In future fetch from sessions endpoint
-        }));
+      setPatients(displayPatients);
+    } catch (err) {
+      console.error('[DoctorOverviewDashboard] Fetch error:', err);
+      setError('เกิดข้อผิดพลาดในการโหลดข้อมูล');
+      setPatients([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }
 
-        setPatients(displayPatients);
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          console.error('[DoctorOverviewDashboard] Fetch error:', err);
-          setError('เกิดข้อผิดพลาดในการโหลดข้อมูล');
-          setPatients([]);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setIsLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
+  useEffect(() => {
+    fetchPatients();
   }, [authToken]);
+
+  async function handleAddPatient() {
+    if (!authToken) return;
+    try {
+      const fullName = `${newName.trim()} ${newLastName.trim()}`.trim();
+      const payload = {
+        name: fullName || undefined,
+        hnCode: newHn.trim(),
+        phoneNumber: newPhone.trim(),
+        age: newAge ? Number(newAge) : undefined,
+      };
+      const res = await createPatient(authToken, payload);
+      if (!res.success) {
+        alert(res.error || 'ไม่สามารถเพิ่มผู้ป่วยได้');
+        return;
+      }
+      setShowAddModal(false);
+      setNewName('');
+      setNewLastName('');
+      setNewHn('');
+      setNewPhone('');
+      setNewAge('');
+      setNewGender('');
+      setNewSurgeryLocation('');
+      setNewMachine('');
+      await fetchPatients();
+    } catch (err) {
+      console.error('[DoctorOverviewDashboard] Add patient error:', err);
+      alert('เกิดข้อผิดพลาดขณะเพิ่มผู้ป่วย');
+    }
+  }
+
+  async function handleSavePlan() {
+    // manage-plan flow moved to dedicated screen; no-op here
+  }
 
   const filtered = patients.filter(
     (p) =>
@@ -137,6 +186,7 @@ export function DoctorOverviewDashboard() {
           <ActivityIndicator size="large" color={DSColors.primary} />
           <Text style={styles.loadingText}>กำลังโหลดรายชื่อผู้ป่วย...</Text>
         </View>
+        
       </SafeAreaView>
     );
   }
@@ -155,11 +205,75 @@ export function DoctorOverviewDashboard() {
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <View style={[styles.container, isTablet && styles.containerTablet]}>
-        {/* Header */}
-        <View style={styles.header}>
-          <Text style={styles.title}>ภาพรวมแพทย์</Text>
-          <Text style={styles.subtitle}>Doctor Overview</Text>
-        </View>
+        {/* Header provided by RootLayout Stack */}
+        {/* button moved into patient list section for better layout */}
+
+        {/* Add Patient Modal */}
+        <Modal visible={showAddModal} animationType="slide" onRequestClose={() => setShowAddModal(false)}>
+          <SafeAreaView style={{ flex: 1 }}>
+            <ThemedView style={[styles.addModal, { padding: DSLayout.screenPadding }]}>
+              <ThemedText type="title" style={{ marginBottom: 12, color: DSColors.text.primary }}>ข้อมูลผู้ป่วย (Patient Information)</ThemedText>
+
+                <View style={styles.rowSplit}>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <ThemedText type="subtitle" style={{ marginBottom: 6, color: DSColors.text.primary }}>ชื่อ (First Name)</ThemedText>
+                    <TextInput placeholder="ชื่อจริง" placeholderTextColor={DSColors.text.secondary} value={newName} onChangeText={setNewName} style={styles.input} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <ThemedText type="subtitle" style={{ marginBottom: 6, color: DSColors.text.primary }}>นามสกุล (Last Name)</ThemedText>
+                    <TextInput placeholder="นามสกุล" placeholderTextColor={DSColors.text.secondary} value={newLastName} onChangeText={setNewLastName} style={styles.input} />
+                  </View>
+                </View>
+
+                <ThemedText type="subtitle" style={{ marginBottom: 6, color: DSColors.text.primary }}>รหัสผู้ป่วย / HN (Hospital Number)</ThemedText>
+                <TextInput placeholder="เช่น HN123456" placeholderTextColor={DSColors.text.secondary} value={newHn} onChangeText={setNewHn} style={styles.input} />
+
+                <ThemedText type="subtitle" style={{ marginBottom: 6, color: DSColors.text.primary }}>เบอร์โทรศัพท์ (Phone Number) *</ThemedText>
+                <TextInput placeholder="08XXXXXXXX" placeholderTextColor={DSColors.text.secondary} value={newPhone} onChangeText={setNewPhone} style={styles.input} keyboardType="phone-pad" />
+                <ThemedText type="default" style={{ marginBottom: 10, color: DSColors.text.secondary }}>ใช้สำหรับให้ผู้ป่วยเข้าสู่ระบบแอปพลิเคชัน (Used for patient app login)</ThemedText>
+
+                <View style={styles.rowSplit}>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <ThemedText type="subtitle" style={{ marginBottom: 6, color: DSColors.text.primary }}>อายุ (Age)</ThemedText>
+                    <TextInput placeholder="เช่น 45" placeholderTextColor={DSColors.text.secondary} value={newAge} onChangeText={setNewAge} keyboardType="numeric" style={styles.input} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <ThemedText type="subtitle" style={{ marginBottom: 6, color: DSColors.text.primary }}>เพศ (Gender)</ThemedText>
+                    <Pressable style={styles.selectBox} onPress={() => { /* future: open gender picker */ }}>
+                      <Text style={{ color: newGender ? DSColors.text.primary : DSColors.text.secondary }}>{newGender || '— เลือกเพศ —'}</Text>
+                    </Pressable>
+                  </View>
+                </View>
+
+                <View style={{ height: 12 }} />
+                <ThemedText type="title" style={{ marginBottom: 12, color: DSColors.text.primary }}>ข้อมูลการรักษาและอุปกรณ์ (Treatment & Device)</ThemedText>
+                <ThemedText type="subtitle" style={{ marginBottom: 6, color: DSColors.text.primary }}>บริเวณที่ผ่าตัด (Surgery Type / Location)</ThemedText>
+                <Pressable style={styles.selectBox} onPress={() => { /* future: open surgery picker */ }}>
+                  <Text style={{ color: newSurgeryLocation ? DSColors.text.primary : DSColors.text.secondary }}>{newSurgeryLocation || '— เลือกบริเวณ —'}</Text>
+                </Pressable>
+
+                <ThemedText type="subtitle" style={{ marginTop: 10, marginBottom: 6, color: DSColors.text.primary }}>เลือกเครื่องกายภาพ (Assign Machine)</ThemedText>
+                <Pressable style={styles.selectBox} onPress={() => { /* future: open machine picker */ }}>
+                  <Text style={{ color: newMachine ? DSColors.text.primary : DSColors.text.secondary }}>{newMachine || '— เลือกเครื่อง —'}</Text>
+                </Pressable>
+              <View style={styles.addModalActions}>
+                <Pressable
+                  onPress={() => setShowAddModal(false)}
+                  style={({ pressed }) => [styles.outlineButton, pressed && styles.pressed]}
+                >
+                  <Text style={styles.outlineButtonText}>ยกเลิก</Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={handleAddPatient}
+                  style={({ pressed }) => [styles.primaryButton, pressed && styles.primaryPressed]}
+                >
+                  <Text style={styles.primaryButtonText}>บันทึก</Text>
+                </Pressable>
+              </View>
+            </ThemedView>
+          </SafeAreaView>
+        </Modal>
 
         {/* Summary cards */}
         <View style={[styles.summaryRow, isTablet && styles.summaryRowTablet]}>
@@ -176,7 +290,13 @@ export function DoctorOverviewDashboard() {
 
         {/* Patient list section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>รายชื่อผู้ป่วย</Text>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>รายชื่อผู้ป่วย</Text>
+            <Pressable style={styles.addButton} onPress={() => setShowAddModal(true)}>
+              <Text style={styles.addButtonText}>+ เพิ่มผู้ป่วย</Text>
+            </Pressable>
+          </View>
+
           <View style={[styles.searchWrap, DSShadowSoft]}>
             <Ionicons name="search" size={20} color={DSColors.text.secondary} />
             <TextInput
@@ -202,12 +322,31 @@ export function DoctorOverviewDashboard() {
                   <Text style={styles.emptyText}>ไม่พบผู้ป่วยที่ตรงกับคำค้น</Text>
                 </View>
               }
-              renderItem={({ item }) => <PatientRow item={item} />}
+              renderItem={({ item }) => (
+                <Pressable onPress={() => { setManagePatientId(item.id); setShowManageModal(true); }}>
+                  <PatientRow item={item} />
+                </Pressable>
+              )}
               ItemSeparatorComponent={() => <View style={styles.separator} />}
               contentContainerStyle={filtered.length === 0 ? styles.listContentEmpty : undefined}
               scrollEnabled={!isTablet}
             />
           </View>
+          {/* Manage Patient Modal (popup) */}
+          <Modal visible={showManageModal} animationType="fade" transparent onRequestClose={() => setShowManageModal(false)}>
+            <View style={styles.modalOverlay}>
+              <ScrollView
+                contentContainerStyle={styles.modalScrollContent}
+                style={styles.modalCardWrapper}
+              >
+                {managePatientId !== null && (
+                  <View style={styles.modalContentWrap}>
+                    <ManagePatientScreen patientIdProp={managePatientId} embedded onClose={() => setShowManageModal(false)} />
+                  </View>
+                )}
+              </ScrollView>
+            </View>
+          </Modal>
         </View>
       </View>
     </SafeAreaView>
@@ -308,6 +447,12 @@ const styles = StyleSheet.create({
     color: DSColors.text.primary,
     marginBottom: 12,
   },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
   searchWrap: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -342,6 +487,100 @@ const styles = StyleSheet.create({
   emptyText: {
     ...DSTypography.body,
     color: DSColors.text.secondary,
+  },
+  addModal: {
+    flex: 1,
+    backgroundColor: DSColors.surface,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: DSColors.border,
+    padding: 12,
+    borderRadius: DSShape.radiusButton,
+    marginBottom: 10,
+    backgroundColor: DSColors.surface,
+    color: DSColors.text.primary,
+  },
+  addModalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 12,
+    marginTop: 8,
+  },
+  addButton: {
+    alignSelf: 'flex-start',
+    backgroundColor: DSColors.primary,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+  },
+  addButtonText: {
+    color: DSColors.text.inverse,
+    fontWeight: '600',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: DSLayout.screenPadding,
+  },
+  modalScrollContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalCardWrapper: {
+    width: '100%',
+    maxWidth: 900,
+    backgroundColor: DSColors.surface,
+    borderRadius: DSShape.radiusCard,
+    overflow: 'hidden',
+    maxHeight: '90%',
+  },
+  modalContentWrap: {
+    paddingTop: DSLayout.screenPadding,
+    paddingHorizontal: DSLayout.screenPadding,
+    paddingBottom: DSLayout.screenPadding,
+  },
+  outlineButton: {
+    borderWidth: 1,
+    borderColor: DSColors.border,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: DSShape.radiusButton,
+    backgroundColor: DSColors.surface,
+    marginRight: 8,
+  },
+  outlineButtonText: {
+    color: DSColors.text.primary,
+    fontWeight: '600',
+  },
+  primaryButton: {
+    backgroundColor: DSColors.primary,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: DSShape.radiusButton,
+  },
+  primaryPressed: {
+    backgroundColor: DSColors.primaryDark,
+  },
+  primaryButtonText: {
+    color: DSColors.text.inverse,
+    fontWeight: '700',
+  },
+  pressed: { opacity: 0.8 },
+  rowSplit: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  selectBox: {
+    borderWidth: 1,
+    borderColor: DSColors.border,
+    padding: 12,
+    borderRadius: DSShape.radiusButton,
+    backgroundColor: DSColors.surface,
+    justifyContent: 'center',
   },
   row: {
     flexDirection: 'row',

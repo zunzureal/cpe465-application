@@ -114,6 +114,66 @@ export async function getDoctorPatients(
   return apiCall<{ patients: DoctorPatient[] }>('/api/patients', {}, authToken);
 }
 
+export interface CreatePatientPayload {
+  name: string;
+  hnCode?: string;
+  phoneNumber?: string;
+  age?: number;
+  hospitalId?: number;
+}
+
+/**
+ * Create a new patient (doctor only)
+ */
+export async function createPatient(
+  authToken: string,
+  body: CreatePatientPayload
+): Promise<ApiResponse<{ patientId: number }>> {
+  return apiCall<{ patientId: number }>('/api/patients', {
+    method: 'POST',
+    body,
+  }, authToken);
+}
+
+/**
+ * Get a single patient (doctor only)
+ */
+export async function getDoctorPatient(
+  authToken: string,
+  patientId: number
+): Promise<ApiResponse<{ id: number; name: string; hnCode: string; age?: number; phoneNumber?: string }>> {
+  return apiCall(`/api/patients/${patientId}`, {}, authToken);
+}
+
+export interface PutPatientPresetPayload {
+  targetFlexion: number;
+  targetExtension?: number;
+  speedLevel?: number;
+  durationMinutes?: number;
+  useWarmup?: boolean;
+  targetForceN?: number | null;
+  forceLevel?: number | null;
+  // optional scheduling fields
+  startDate?: string;
+  endDate?: string;
+  sessionsPerDay?: number;
+  daysOfWeek?: number[]; // 0=Sunday..6=Saturday
+}
+
+/**
+ * Update or create a treatment preset for a patient (doctor only)
+ */
+export async function putPatientPreset(
+  authToken: string,
+  patientId: number,
+  body: PutPatientPresetPayload
+): Promise<ApiResponse<TreatmentPlanResponse>> {
+  return apiCall<TreatmentPlanResponse>(`/api/patients/${patientId}/preset`, {
+    method: 'PUT',
+    body,
+  }, authToken);
+}
+
 // ─── PATIENT ENDPOINTS ────────────────────────────────────────────────────
 
 export interface PatientLookupResponse {
