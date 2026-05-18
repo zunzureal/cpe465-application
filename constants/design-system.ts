@@ -61,8 +61,12 @@ export const DSShadow = Platform.select({
     shadowRadius: 12,
   },
   android: { elevation: 4 },
+  web: { boxShadow: '0px 8px 24px rgba(0,0,0,0.08)' },
   default: {},
-}) as { shadowColor?: string; shadowOffset?: { width: number; height: number }; shadowOpacity?: number; shadowRadius?: number } | { elevation?: number };
+}) as
+  | { shadowColor?: string; shadowOffset?: { width: number; height: number }; shadowOpacity?: number; shadowRadius?: number }
+  | { elevation?: number }
+  | { boxShadow?: string };
 
 export const DSShadowSoft = Platform.select({
   ios: {
@@ -72,8 +76,12 @@ export const DSShadowSoft = Platform.select({
     shadowRadius: 8,
   },
   android: { elevation: 2 },
+  web: { boxShadow: '0px 4px 12px rgba(0,0,0,0.06)' },
   default: {},
-}) as { shadowColor?: string; shadowOffset?: { width: number; height: number }; shadowOpacity?: number; shadowRadius?: number } | { elevation?: number };
+}) as
+  | { shadowColor?: string; shadowOffset?: { width: number; height: number }; shadowOpacity?: number; shadowRadius?: number }
+  | { elevation?: number }
+  | { boxShadow?: string };
 
 // ─── Layout ──────────────────────────────────────────────────────────────
 export const DSLayout = {

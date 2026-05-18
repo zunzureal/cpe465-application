@@ -52,6 +52,21 @@ export function DoctorOverviewDashboard() {
   const { width } = useWindowDimensions();
   const { authToken } = useAuth();
   const isTablet = width >= 768;
+
+  // Responsive breakpoints for modal sizing
+  // breakpoints (px): small <480, medium 480-767, tablet 768-1023, desktop 1024-1399, xl >=1400
+  let sideGap = 16;
+  if (width >= 1400) sideGap = 80;
+  else if (width >= 1200) sideGap = 60;
+  else if (width >= 1024) sideGap = 48;
+  else if (width >= 768) sideGap = 32;
+  else if (width >= 480) sideGap = 24;
+
+  const maxCardWidth = 1200;
+  const cardWidthPx = Math.min(maxCardWidth, Math.max(320, width - sideGap * 2));
+  const overlayPaddingHorizontal = sideGap;
+  const isSmall = width < 480;
+  const contentPadding = Math.min(48, Math.max(12, Math.round(sideGap / 1.5)));
   const [showAddModal, setShowAddModal] = useState(false);
   const [showManageModal, setShowManageModal] = useState(false);
   const [managePatientId, setManagePatientId] = useState<number | null>(null);
@@ -333,18 +348,17 @@ export function DoctorOverviewDashboard() {
             />
           </View>
           {/* Manage Patient Modal (popup) */}
-          <Modal visible={showManageModal} animationType="fade" transparent onRequestClose={() => setShowManageModal(false)}>
-            <View style={styles.modalOverlay}>
-              <ScrollView
-                contentContainerStyle={styles.modalScrollContent}
-                style={styles.modalCardWrapper}
-              >
-                {managePatientId !== null && (
-                  <View style={styles.modalContentWrap}>
-                    <ManagePatientScreen patientIdProp={managePatientId} embedded onClose={() => setShowManageModal(false)} />
-                  </View>
-                )}
-              </ScrollView>
+          <Modal visible={showManageModal} animationType="none" transparent onRequestClose={() => setShowManageModal(false)}>
+            <View style={[styles.modalOverlay, { paddingHorizontal: overlayPaddingHorizontal }] }>
+              <View style={isSmall ? styles.modalCardFull : [styles.modalCardWrapper, { width: cardWidthPx }] }>
+                <ScrollView contentContainerStyle={styles.modalScrollContent}>
+                  {managePatientId !== null && (
+                    <View style={[styles.modalContentWrap, { paddingHorizontal: contentPadding }] }>
+                      <ManagePatientScreen patientIdProp={managePatientId} embedded onClose={() => setShowManageModal(false)} />
+                    </View>
+                  )}
+                </ScrollView>
+              </View>
             </View>
           </Modal>
         </View>
@@ -388,7 +402,7 @@ const styles = StyleSheet.create({
     padding: DSLayout.screenPadding,
   },
   containerTablet: {
-    maxWidth: 900,
+    maxWidth: 1200,
     alignSelf: 'center',
     width: '100%',
   },
@@ -523,25 +537,44 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.45)',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: DSLayout.screenPadding,
+    paddingHorizontal: 0,
+    paddingVertical: 20,
   },
   modalScrollContent: {
     flexGrow: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    width: '100%',
   },
   modalCardWrapper: {
     width: '100%',
-    maxWidth: 900,
+    maxWidth: 1200,
     backgroundColor: DSColors.surface,
     borderRadius: DSShape.radiusCard,
     overflow: 'hidden',
     maxHeight: '90%',
   },
+  modalCardWeb: {
+    width: '100%',
+    maxWidth: 1200,
+    backgroundColor: DSColors.surface,
+    borderRadius: DSShape.radiusCard,
+    overflow: 'hidden',
+    maxHeight: '90%',
+    alignSelf: 'center',
+  },
+  modalCardFull: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: DSColors.surface,
+    borderRadius: 0,
+    overflow: 'hidden',
+  },
+  
   modalContentWrap: {
-    paddingTop: DSLayout.screenPadding,
+    paddingTop: 24,
     paddingHorizontal: DSLayout.screenPadding,
-    paddingBottom: DSLayout.screenPadding,
+    paddingBottom: 24,
   },
   outlineButton: {
     borderWidth: 1,
