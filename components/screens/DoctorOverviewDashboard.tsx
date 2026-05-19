@@ -309,33 +309,33 @@ export function DoctorOverviewDashboard() {
                   nestedScrollEnabled
                   showsVerticalScrollIndicator
                 >
-                  <ThemedText type="title" style={{ marginBottom: 12, color: DSColors.text.primary }}>ข้อมูลผู้ป่วย (Patient Information)</ThemedText>
+                  <ThemedText type="title" style={{ fontSize: 22, marginTop: 12 ,marginBottom: 24, color: DSColors.text.primary }}>ข้อมูลผู้ป่วย (Patient Information)</ThemedText>
 
                 <View style={styles.rowSplit}>
                   <View style={{ flex: 1, marginRight: 8 }}>
-                    <ThemedText type="subtitle" style={{ marginBottom: 6, color: DSColors.text.primary }}>ชื่อ (First Name)</ThemedText>
+                    <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>ชื่อ (First Name)</ThemedText>
                     <TextInput placeholder="ชื่อจริง" placeholderTextColor={DSColors.text.secondary} value={newName} onChangeText={setNewName} style={styles.input} />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <ThemedText type="subtitle" style={{ marginBottom: 6, color: DSColors.text.primary }}>นามสกุล (Last Name)</ThemedText>
+                    <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>นามสกุล (Last Name)</ThemedText>
                     <TextInput placeholder="นามสกุล" placeholderTextColor={DSColors.text.secondary} value={newLastName} onChangeText={setNewLastName} style={styles.input} />
                   </View>
                 </View>
 
-                <ThemedText type="subtitle" style={{ marginBottom: 6, color: DSColors.text.primary }}>รหัสผู้ป่วย / HN (Hospital Number)</ThemedText>
+                <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>รหัสผู้ป่วย / HN (Hospital Number)</ThemedText>
                 <TextInput placeholder="เช่น HN123456" placeholderTextColor={DSColors.text.secondary} value={newHn} onChangeText={setNewHn} style={styles.input} />
 
-                <ThemedText type="subtitle" style={{ marginBottom: 6, color: DSColors.text.primary }}>เบอร์โทรศัพท์ (Phone Number) *</ThemedText>
+                <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>เบอร์โทรศัพท์ (Phone Number) *</ThemedText>
                 <TextInput placeholder="08XXXXXXXX" placeholderTextColor={DSColors.text.secondary} value={newPhone} onChangeText={setNewPhone} style={styles.input} keyboardType="phone-pad" />
-                <ThemedText type="default" style={{ marginBottom: 10, color: DSColors.text.secondary }}>ใช้สำหรับให้ผู้ป่วยเข้าสู่ระบบแอปพลิเคชัน (Used for patient app login)</ThemedText>
+                <ThemedText type="default" style={{ fontSize: 12, marginLeft: 4,marginBottom: 10, color: DSColors.text.secondary }}>ใช้สำหรับให้ผู้ป่วยเข้าสู่ระบบแอปพลิเคชัน (Used for patient app login)</ThemedText>
 
                 <View style={styles.rowSplit}>
                   <View style={{ flex: 1, marginRight: 8 }}>
-                    <ThemedText type="subtitle" style={{ marginBottom: 6, color: DSColors.text.primary }}>อายุ (Age)</ThemedText>
+                    <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>อายุ (Age)</ThemedText>
                     <TextInput placeholder="เช่น 45" placeholderTextColor={DSColors.text.secondary} value={newAge} onChangeText={setNewAge} keyboardType="numeric" style={styles.input} />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <ThemedText type="subtitle" style={{ marginBottom: 6, color: DSColors.text.primary }}>เพศ (Gender)</ThemedText>
+                    <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>เพศ (Gender)</ThemedText>
                     <Pressable style={styles.selectBox} onPress={() => openPicker('gender')}>
                       <Text style={{ color: newGender ? DSColors.text.primary : DSColors.text.secondary }}>{newGender || '— เลือกเพศ —'}</Text>
                     </Pressable>
@@ -343,13 +343,13 @@ export function DoctorOverviewDashboard() {
                 </View>
 
                 <View style={{ height: 12 }} />
-                <ThemedText type="title" style={{ marginBottom: 12, color: DSColors.text.primary }}>ข้อมูลการรักษาและอุปกรณ์ (Treatment & Device)</ThemedText>
-                <ThemedText type="subtitle" style={{ marginBottom: 6, color: DSColors.text.primary }}>บริเวณที่ผ่าตัด (Surgery Type / Location)</ThemedText>
+                <ThemedText type="title" style={{ fontSize: 22, marginBottom: 12, color: DSColors.text.primary }}>ข้อมูลการรักษาและอุปกรณ์ (Treatment & Device)</ThemedText>
+                <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>บริเวณที่ผ่าตัด (Surgery Type / Location)</ThemedText>
                 <Pressable style={styles.selectBox} onPress={() => openPicker('surgery')}>
                   <Text style={{ color: newSurgeryLocation ? DSColors.text.primary : DSColors.text.secondary }}>{newSurgeryLocation || '— เลือกบริเวณ —'}</Text>
                 </Pressable>
 
-                  <ThemedText type="subtitle" style={{ marginTop: 10, marginBottom: 6, color: DSColors.text.primary }}>เลือกเครื่องกายภาพ (Assign Machine)</ThemedText>
+                  <ThemedText type="subtitle" style={{ fontSize: 16, marginTop: 10, marginBottom: 6, color: DSColors.text.primary }}>เลือกเครื่องกายภาพ (Assign Machine)</ThemedText>
                   <Pressable style={styles.selectBox} onPress={() => openPicker('machine')}>
                     <Text style={{ color: newMachine ? DSColors.text.primary : DSColors.text.secondary }}>{newMachine || '— เลือกเครื่อง —'}</Text>
                   </Pressable>

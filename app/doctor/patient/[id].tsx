@@ -455,7 +455,7 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
                     const x = mapPoint(0, index, labels.length).x;
                     return (
                       <SvgText
-                        key={label}
+                        key={`${label}-${index}`}
                         x={x}
                         y={chartHeight - 10}
                         fontSize="10"
@@ -763,7 +763,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   primaryButtonText: {
-    color: DSColors.text.inverse,
+    color: DSColors.text.primary,
     fontWeight: '700',
   },
   outlineButtonText: {
