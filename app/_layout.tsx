@@ -1,7 +1,9 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, View, Alert, Pressable } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import 'react-native-reanimated';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
@@ -13,6 +15,61 @@ import { DSColors } from '@/constants/design-system';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { DevicePairedProvider } from '@/contexts/DevicePairedContext';
 import '@/global.css';
+
+function LogoutButton() {
+  const router = useRouter();
+  const auth = useAuth();
+
+  const handleLogout = async () => {
+    Alert.alert(
+      'ยืนยันการออกจากระบบ',
+      'คุณต้องการออกจากระบบและกลับไปที่หน้าเลือกบทบาทหรือไม่?',
+      [
+        { text: 'ยกเลิก', style: 'cancel' },
+        {
+          text: 'ออกจากระบบ',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await auth.logout();
+            } catch (err) {
+              console.error('[LogoutButton] Logout error:', err);
+              Alert.alert('ออกจากระบบไม่สำเร็จ', 'กรุณาลองอีกครั้ง');
+              return;
+            }
+            try {
+              router.replace('/');
+            } catch (navErr) {
+              console.warn('[LogoutButton] router.replace failed', navErr);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  return (
+    <Pressable
+      hitSlop={10}
+      onPress={handleLogout}
+      accessibilityRole="button"
+      accessibilityLabel="ออกจากระบบ"
+      style={({ pressed }) => [
+        {
+          width: 40,
+          height: 40,
+          borderRadius: 8,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: DSColors.primaryLight,
+          opacity: pressed ? 0.6 : 1,
+        },
+      ]}
+    >
+      <Ionicons name="log-out" size={22} color={DSColors.primary} />
+    </Pressable>
+  );
+}
 
 function RootContent() {
   const auth = useAuth();
@@ -48,30 +105,32 @@ function RootContent() {
     );
   }
 
-  // When user is logged in, show full app navigation
+  // When user is logged in, show full app navigation with logout button
   return (
-    <Stack
-      screenOptions={{
-        header: () => <CustomHeader />,
-        headerShown: true,
-        contentStyle: { backgroundColor: DSColors.background },
-      }}
-    >
-      <Stack.Screen name="(tabs)" />
-      <Stack.Screen name="doctor" />
-      <Stack.Screen
-        name="therapy-session"
-        options={{ header: () => <CustomHeader showBack /> }}
-      />
-      <Stack.Screen
-        name="manual-setup"
-        options={{ header: () => <CustomHeader showBack /> }}
-      />
-      <Stack.Screen
-        name="modal"
-        options={{ presentation: 'modal', headerShown: false }}
-      />
-    </Stack>
+    <>
+      <Stack
+        screenOptions={{
+          header: () => <CustomHeader rightSlot={<LogoutButton />} />,
+          headerShown: true,
+          contentStyle: { backgroundColor: DSColors.background },
+        }}
+      >
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="doctor" />
+        <Stack.Screen
+          name="therapy-session"
+          options={{ header: () => <CustomHeader showBack /> }}
+        />
+        <Stack.Screen
+          name="manual-setup"
+          options={{ header: () => <CustomHeader showBack /> }}
+        />
+        <Stack.Screen
+          name="modal"
+          options={{ presentation: 'modal', headerShown: false }}
+        />
+      </Stack>
+    </>
   );
 }
 

@@ -8,6 +8,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { LineChart } from 'react-native-chart-kit';
+// Chart types from react-native-chart-kit are incompatible with our React typings
+// in some environments; provide a local any-typed alias for JSX usage.
+const AnyLineChart = LineChart as any;
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { getPatientSessions } from '@/services/apiClient';
@@ -145,22 +148,22 @@ function transformApiSessions(apiSessions: any[]): SessionRecord[] {
 // Keep MOCK_SESSIONS as fallback for development
 const MOCK_SESSIONS: SessionRecord[] = [
   // 4 มี.ค. — 3/3 ✓
-  { id: '1a', date: '4 มี.ค. 2568', time: '09:30', sessionNum: 1, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 88, targetFlexion: 85, painLevel: 1, isManual: false, dayLabel: 'ศ.' },
-  { id: '1b', date: '4 มี.ค. 2568', time: '12:00', sessionNum: 2, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 89, targetFlexion: 85, painLevel: 1, isManual: false, dayLabel: 'ศ.' },
-  { id: '1c', date: '4 มี.ค. 2568', time: '15:00', sessionNum: 3, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 90, targetFlexion: 85, painLevel: 2, isManual: false, dayLabel: 'ศ.' },
+  { id: '1a', date: '4 มี.ค. 2568', time: '09:30', ts: Date.now(), sessionNum: 1, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 88, targetFlexion: 85, painLevel: 1, isManual: false, dayLabel: 'ศ.' },
+  { id: '1b', date: '4 มี.ค. 2568', time: '12:00', ts: Date.now(), sessionNum: 2, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 89, targetFlexion: 85, painLevel: 1, isManual: false, dayLabel: 'ศ.' },
+  { id: '1c', date: '4 มี.ค. 2568', time: '15:00', ts: Date.now(), sessionNum: 3, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 90, targetFlexion: 85, painLevel: 2, isManual: false, dayLabel: 'ศ.' },
   // 3 มี.ค. — 2/3
-  { id: '2a', date: '3 มี.ค. 2568', time: '09:00', sessionNum: 1, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 85, targetFlexion: 85, painLevel: 2, isManual: true,  dayLabel: 'พฤ.' },
-  { id: '2b', date: '3 มี.ค. 2568', time: '13:30', sessionNum: 2, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 84, targetFlexion: 85, painLevel: 2, isManual: false, dayLabel: 'พฤ.' },
+  { id: '2a', date: '3 มี.ค. 2568', time: '09:00', ts: Date.now(), sessionNum: 1, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 85, targetFlexion: 85, painLevel: 2, isManual: true,  dayLabel: 'พฤ.' },
+  { id: '2b', date: '3 มี.ค. 2568', time: '13:30', ts: Date.now(), sessionNum: 2, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 84, targetFlexion: 85, painLevel: 2, isManual: false, dayLabel: 'พฤ.' },
   // 2 มี.ค. — 3/3 ✓
-  { id: '3a', date: '2 มี.ค. 2568', time: '10:15', sessionNum: 1, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 86, targetFlexion: 85, painLevel: 1, isManual: false, dayLabel: 'พ.' },
-  { id: '3b', date: '2 มี.ค. 2568', time: '13:00', sessionNum: 2, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 87, targetFlexion: 85, painLevel: 1, isManual: false, dayLabel: 'พ.' },
-  { id: '3c', date: '2 มี.ค. 2568', time: '16:00', sessionNum: 3, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 88, targetFlexion: 85, painLevel: 1, isManual: false, dayLabel: 'พ.' },
+  { id: '3a', date: '2 มี.ค. 2568', time: '10:15', ts: Date.now(), sessionNum: 1, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 86, targetFlexion: 85, painLevel: 1, isManual: false, dayLabel: 'พ.' },
+  { id: '3b', date: '2 มี.ค. 2568', time: '13:00', ts: Date.now(), sessionNum: 2, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 87, targetFlexion: 85, painLevel: 1, isManual: false, dayLabel: 'พ.' },
+  { id: '3c', date: '2 มี.ค. 2568', time: '16:00', ts: Date.now(), sessionNum: 3, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 88, targetFlexion: 85, painLevel: 1, isManual: false, dayLabel: 'พ.' },
   // 1 มี.ค. — 1/3
-  { id: '4a', date: '1 มี.ค. 2568', time: '16:45', sessionNum: 1, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 82, targetFlexion: 80, painLevel: 2, isManual: false, dayLabel: 'อ.' },
+  { id: '4a', date: '1 มี.ค. 2568', time: '16:45', ts: Date.now(), sessionNum: 1, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 82, targetFlexion: 80, painLevel: 2, isManual: false, dayLabel: 'อ.' },
   // 28 ก.พ. — 3/3 ✓
-  { id: '5a', date: '28 ก.พ. 2568', time: '09:00', sessionNum: 1, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 78, targetFlexion: 75, painLevel: 1, isManual: false, dayLabel: 'จ.' },
-  { id: '5b', date: '28 ก.พ. 2568', time: '12:00', sessionNum: 2, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 79, targetFlexion: 75, painLevel: 1, isManual: true,  dayLabel: 'จ.' },
-  { id: '5c', date: '28 ก.พ. 2568', time: '15:30', sessionNum: 3, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 80, targetFlexion: 75, painLevel: 1, isManual: false, dayLabel: 'จ.' },
+  { id: '5a', date: '28 ก.พ. 2568', time: '09:00', ts: Date.now(), sessionNum: 1, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 78, targetFlexion: 75, painLevel: 1, isManual: false, dayLabel: 'จ.' },
+  { id: '5b', date: '28 ก.พ. 2568', time: '12:00', ts: Date.now(), sessionNum: 2, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 79, targetFlexion: 75, painLevel: 1, isManual: true,  dayLabel: 'จ.' },
+  { id: '5c', date: '28 ก.พ. 2568', time: '15:30', ts: Date.now(), sessionNum: 3, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 80, targetFlexion: 75, painLevel: 1, isManual: false, dayLabel: 'จ.' },
 ];
 
 // Hidden flag to force mock data (useful for offline/manual testing).
@@ -373,7 +376,7 @@ export default function HistoryScreen() {
   }, [dayGroups]);
 
   const contentPadding = DSLayout.screenPadding * 2;
-  const chartWidth = Math.max(screenWidth - contentPadding - 40, 200);
+  const chartWidth = Math.max(screenWidth - contentPadding - 8, 200);
   const chartHeight = Math.max(180, Math.min(220, screenWidth * 0.55));
   const totalSessions = displaySessions.length;
   const totalDays = dayGroups.length;
@@ -408,7 +411,7 @@ export default function HistoryScreen() {
           </View>
           <Text style={styles.chartSubtitle}>Flexion Progress</Text>
 
-          <LineChart
+          <AnyLineChart
             data={chartData}
             width={chartWidth}
             height={chartHeight}
@@ -424,7 +427,7 @@ export default function HistoryScreen() {
             withVerticalLabels
             withHorizontalLabels
             segments={5}
-            formatYLabel={(v) => `${v}°`}
+            formatYLabel={(v: string) => `${v}°`}
           />
 
           <View style={styles.legend}>
@@ -574,6 +577,7 @@ const styles = StyleSheet.create({
   },
   chart: {
     borderRadius: DSShape.radiusButton,
+    alignSelf: 'stretch',
   },
   legend: {
     flexDirection: 'row',

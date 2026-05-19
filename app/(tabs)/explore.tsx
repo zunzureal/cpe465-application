@@ -19,13 +19,12 @@ import {
 import { useMockDeviceConnection } from '@/hooks/useMockDeviceConnection';
 
 // Mock
-const MOCK_PATIENT_NAME = 'คุณสมชาย ใจดี';
-const MOCK_PATIENT_ID = 'PID-2401';
-
 export default function SettingsScreen() {
   const router = useRouter();
   const auth = useAuth();
   const { isPaired, hydrated, clearDevicePaired } = useDevicePaired();
+  const patientName = auth.patientName ?? 'ผู้ใช้งาน';
+  const patientId = auth.patientId ? `PID-${String(auth.patientId).padStart(4, '0')}` : auth.identifier ?? '—';
 
   const {
     visible: pairModalVisible,
@@ -77,21 +76,19 @@ export default function SettingsScreen() {
         {
           text: 'ออกจากระบบ',
           style: 'destructive',
-          onPress: () => {
-            // Navigate immediately so UI responds quickly, then clear auth in background.
+          onPress: async () => {
+            try {
+              await auth.logout();
+            } catch (err) {
+              console.error('[explore] Logout error:', err);
+              Alert.alert('ออกจากระบบไม่สำเร็จ', 'กรุณาลองอีกครั้ง');
+              return;
+            }
             try {
               router.replace('/');
             } catch (navErr) {
               console.warn('[explore] router.replace failed', navErr);
             }
-            void (async () => {
-              try {
-                await auth.logout();
-              } catch (err) {
-                console.error('[explore] Logout error:', err);
-                Alert.alert('ออกจากระบบไม่สำเร็จ', 'กรุณาลองอีกครั้ง');
-              }
-            })();
           },
         },
       ],
@@ -115,9 +112,9 @@ export default function SettingsScreen() {
               <Ionicons name="person" size={40} color={DSColors.primary} />
             </View>
             <View style={styles.profileInfo}>
-              <Text style={styles.patientName}>{MOCK_PATIENT_NAME}</Text>
+              <Text style={styles.patientName}>{patientName}</Text>
               <Text style={styles.patientId}>
-                รหัสผู้ป่วย (Patient ID): {MOCK_PATIENT_ID}
+                รหัสผู้ป่วย (Patient ID): {patientId}
               </Text>
             </View>
           </View>
