@@ -107,6 +107,7 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
   const { width } = useWindowDimensions();
   const isNarrow = width < 600;
   const isAndroidTablet = Platform.OS === 'android' && width >= 768;
+  const effectiveEmbedded = embedded && !isAndroidTablet;
   const isCompactEmbedded = embedded && isNarrow;
   const [showStartPicker, setShowStartPicker] = useState(false);
   const [showEndPicker, setShowEndPicker] = useState(false);
@@ -275,7 +276,7 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
   }
 
   const body = (
-    <View style={[styles.container, embedded && styles.embeddedContainer, styles.bodyContainer]}>
+    <View style={[styles.container, effectiveEmbedded && styles.embeddedContainer, styles.bodyContainer]}>
       <View style={styles.headerRow}>
         <ThemedText type="title" style={styles.heading}>{'จัดการแผนผู้ป่วย #'}{patientId}</ThemedText>
         {onClose && (
@@ -375,7 +376,7 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
       </View>
 
       <ThemedText type="default" style={styles.sectionLabel}>PROGRESS — TARGET VS ACTUAL FLEXION (LAST 7 SESSIONS)</ThemedText>
-      <ThemedView style={[styles.chartCard, isNarrow ? styles.chartCardNarrow : {}]}>
+      <ThemedView style={[styles.chartCard, isNarrow ? styles.chartCardNarrow : {}, isAndroidTablet ? styles.chartCardTablet : {}]}>
         {sessions.length > 0 ? (
           (() => {
             const recent = sessions.slice(-7);
@@ -493,11 +494,11 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
   );
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: embedded ? 'transparent' : undefined }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: isAndroidTablet ? DSColors.background : (effectiveEmbedded ? 'transparent' : undefined) }}>
       <View style={styles.screenShell}>
         <ScrollView
           style={{ flex: 1 }}
-          contentContainerStyle={[styles.scrollContainer, embedded && styles.embeddedScrollContainer]}
+          contentContainerStyle={[styles.scrollContainer, effectiveEmbedded && styles.embeddedScrollContainer]}
           keyboardShouldPersistTaps="handled"
           nestedScrollEnabled
           showsVerticalScrollIndicator
@@ -505,7 +506,7 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
           {body}
         </ScrollView>
 
-        <View style={[styles.saveFooter, embedded && styles.saveFooterEmbedded]}>
+        <View style={[styles.saveFooter, effectiveEmbedded && styles.saveFooterEmbedded]}>
           <Pressable
             onPress={() => { if (!isSaving) handleSave(); }}
             style={({ pressed }) => [
@@ -586,6 +587,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     ...DSShadowSoft,
+  },
+  chartCardTablet: {
+    borderRadius: 0,
+    elevation: 0,
+    shadowOpacity: 0,
+    backgroundColor: DSColors.surface,
+    borderWidth: 1,
+    borderColor: DSColors.border,
   },
   chartCardNarrow: {
     height: 180,

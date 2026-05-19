@@ -38,7 +38,7 @@ import {
 } from '@/constants/design-system';
 import { useAuth } from '@/contexts/AuthContext';
 import { getDoctorPatients, type DoctorPatient, createPatient, putPatientPreset } from '@/services/apiClient';
-import ManagePatientScreen from '@/app/doctor/patient/[id]';
+// ManagePatientScreen is a separate route now — navigate to it instead of embedding
 
 type Patient = DoctorPatient & {
   status: string;
@@ -79,8 +79,6 @@ export function DoctorOverviewDashboard() {
   const tabletListMaxHeight = isTablet ? Math.max(320, height - 250) : undefined;
   const contentPadding = Math.min(48, Math.max(12, Math.round(sideGap / 1.5)));
   const [showAddModal, setShowAddModal] = useState(false);
-  const [showManageModal, setShowManageModal] = useState(false);
-  const [managePatientId, setManagePatientId] = useState<number | null>(null);
   const [newName, setNewName] = useState('');
   const [newLastName, setNewLastName] = useState('');
   const [newHn, setNewHn] = useState('');
@@ -432,64 +430,66 @@ export function DoctorOverviewDashboard() {
             )}
           </View>
 
-          <View style={[styles.listCardShadow, !isAndroid && DSShadow, isAndroid && isTablet && styles.androidTabletShadowFallback]}>
-            <View style={[styles.listCard, isTablet && { maxHeight: tabletListMaxHeight }, isAndroid && isTablet && styles.androidTabletListFallback]}>
-            <FlatList
-              data={filtered}
-              keyExtractor={(item) => String(item.id)}
-              ListEmptyComponent={
-                <View style={styles.empty}>
-                  <Text style={styles.emptyText}>ไม่พบผู้ป่วยที่ตรงกับคำค้น</Text>
-                </View>
-              }
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  onPress={() => { setManagePatientId(item.id); setShowManageModal(true); }}
-                  activeOpacity={0.7}
-                  style={styles.rowPressable}
-                >
-                  <PatientRow item={item} />
-                </TouchableOpacity>
-              )}
-              ItemSeparatorComponent={() => <View style={styles.separator} />}
-              contentContainerStyle={filtered.length === 0 ? styles.listContentEmpty : undefined}
-              scrollEnabled
-              nestedScrollEnabled
-              keyboardShouldPersistTaps="handled"
-              removeClippedSubviews={false}
-              style={styles.list}
-            />
-            </View>
-          </View>
-          {/* Manage Patient Modal (popup) */}
-          <Modal
-            visible={showManageModal}
-            animationType="slide"
-            transparent={!isTablet}
-            onRequestClose={() => setShowManageModal(false)}
-          >
-            {isTablet ? (
-              <SafeAreaView style={styles.manageTabletScreen}>
-                {managePatientId !== null && (
-                  <ManagePatientScreen
-                    patientIdProp={managePatientId}
-                    embedded={false}
-                    onClose={() => setShowManageModal(false)}
-                  />
+          {isAndroid && isTablet ? (
+            <View style={{ flex: 1, backgroundColor: DSColors.background }}>
+              <FlatList
+                data={filtered}
+                keyExtractor={(item) => String(item.id)}
+                ListEmptyComponent={
+                  <View style={styles.empty}>
+                    <Text style={styles.emptyText}>ไม่พบผู้ป่วยที่ตรงกับคำค้น</Text>
+                  </View>
+                }
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    onPress={() => { router.push(`/doctor/patient/${item.id}`); }}
+                    activeOpacity={0.7}
+                    style={styles.rowPressable}
+                  >
+                    <PatientRow item={item} />
+                  </TouchableOpacity>
                 )}
-              </SafeAreaView>
-            ) : (
-              <View style={[styles.modalOverlay, { paddingHorizontal: overlayPaddingHorizontal }] }>
-                <View style={isSmall ? styles.modalCardFull : [styles.modalCardWrapper, { width: cardWidthPx }] }>
-                  {managePatientId !== null && (
-                    <View style={[styles.modalContentWrap, { paddingHorizontal: contentPadding }] }>
-                      <ManagePatientScreen patientIdProp={managePatientId} embedded onClose={() => setShowManageModal(false)} />
+                ItemSeparatorComponent={() => <View style={styles.separator} />}
+                contentContainerStyle={filtered.length === 0 ? styles.listContentEmpty : undefined}
+                scrollEnabled
+                nestedScrollEnabled
+                keyboardShouldPersistTaps="handled"
+                removeClippedSubviews={false}
+                style={[styles.list, { backgroundColor: 'transparent' }]}
+              />
+            </View>
+          ) : (
+            <View style={[styles.listCardShadow, !isAndroid && DSShadow, isAndroid && isTablet && styles.androidTabletShadowFallback]}>
+              <View style={[styles.listCard, isTablet && { maxHeight: tabletListMaxHeight }, isAndroid && isTablet && styles.androidTabletListFallback]}>
+                <FlatList
+                  data={filtered}
+                  keyExtractor={(item) => String(item.id)}
+                  ListEmptyComponent={
+                    <View style={styles.empty}>
+                      <Text style={styles.emptyText}>ไม่พบผู้ป่วยที่ตรงกับคำค้น</Text>
                     </View>
+                  }
+                  renderItem={({ item }) => (
+                    <TouchableOpacity
+                      onPress={() => { router.push(`/doctor/patient/${item.id}`); }}
+                      activeOpacity={0.7}
+                      style={styles.rowPressable}
+                    >
+                      <PatientRow item={item} />
+                    </TouchableOpacity>
                   )}
-                </View>
+                  ItemSeparatorComponent={() => <View style={styles.separator} />}
+                  contentContainerStyle={filtered.length === 0 ? styles.listContentEmpty : undefined}
+                  scrollEnabled
+                  nestedScrollEnabled
+                  keyboardShouldPersistTaps="handled"
+                  removeClippedSubviews={false}
+                  style={styles.list}
+                />
               </View>
-            )}
-          </Modal>
+            </View>
+          )}
+          {/* ManagePatient now opens as a separate page via router.push(...) */}
         </View>
       </View>
     </SafeAreaView>
@@ -654,6 +654,8 @@ const styles = StyleSheet.create({
     elevation: 0,
     // keep a neutral background so visual doesn't change
     backgroundColor: DSColors.surface,
+    // allow children to render outside bounds when needed
+    overflow: 'visible',
   },
   androidTabletListFallback: {
     // remove rounded clipping to avoid rendering artifacts on Android tablets
