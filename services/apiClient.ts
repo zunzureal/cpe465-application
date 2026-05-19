@@ -121,6 +121,7 @@ export async function getDoctorPatients(
 
 export interface CreatePatientPayload {
   name: string;
+  hospitalNumber?: string;
   hnCode?: string;
   phoneNumber?: string;
   age?: number;

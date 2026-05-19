@@ -179,11 +179,28 @@ export function DoctorOverviewDashboard() {
     if (!authToken) return;
     try {
       const fullName = `${newName.trim()} ${newLastName.trim()}`.trim();
+      const hospitalNumber = newHn.trim();
+      const parsedAge = Number(newAge);
+
+      if (!fullName) {
+        alert('กรุณากรอกชื่อและนามสกุล');
+        return;
+      }
+      if (!hospitalNumber) {
+        alert('กรุณากรอก Hospital Number (HN)');
+        return;
+      }
+      if (!newAge.trim() || Number.isNaN(parsedAge)) {
+        alert('กรุณากรอกอายุเป็นตัวเลข');
+        return;
+      }
+
       const payload = {
-        name: fullName || '',
-        hnCode: newHn.trim(),
+        name: fullName,
+        hospitalNumber,
+        hnCode: hospitalNumber,
         phoneNumber: newPhone.trim(),
-        age: newAge ? Number(newAge) : undefined,
+        age: parsedAge,
       };
       const res = await createPatient(authToken, payload);
       if (!res.success) {
