@@ -462,16 +462,33 @@ export function DoctorOverviewDashboard() {
             </View>
           </View>
           {/* Manage Patient Modal (popup) */}
-          <Modal visible={showManageModal} animationType="none" transparent onRequestClose={() => setShowManageModal(false)}>
-            <View style={[styles.modalOverlay, { paddingHorizontal: overlayPaddingHorizontal }] }>
-              <View style={isSmall ? styles.modalCardFull : [styles.modalCardWrapper, { width: cardWidthPx }] }>
+          <Modal
+            visible={showManageModal}
+            animationType="slide"
+            transparent={!isTablet}
+            onRequestClose={() => setShowManageModal(false)}
+          >
+            {isTablet ? (
+              <SafeAreaView style={styles.manageTabletScreen}>
                 {managePatientId !== null && (
-                  <View style={[styles.modalContentWrap, { paddingHorizontal: contentPadding }] }>
-                    <ManagePatientScreen patientIdProp={managePatientId} embedded onClose={() => setShowManageModal(false)} />
-                  </View>
+                  <ManagePatientScreen
+                    patientIdProp={managePatientId}
+                    embedded={false}
+                    onClose={() => setShowManageModal(false)}
+                  />
                 )}
+              </SafeAreaView>
+            ) : (
+              <View style={[styles.modalOverlay, { paddingHorizontal: overlayPaddingHorizontal }] }>
+                <View style={isSmall ? styles.modalCardFull : [styles.modalCardWrapper, { width: cardWidthPx }] }>
+                  {managePatientId !== null && (
+                    <View style={[styles.modalContentWrap, { paddingHorizontal: contentPadding }] }>
+                      <ManagePatientScreen patientIdProp={managePatientId} embedded onClose={() => setShowManageModal(false)} />
+                    </View>
+                  )}
+                </View>
               </View>
-            </View>
+            )}
           </Modal>
         </View>
       </View>
@@ -762,6 +779,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 0,
     paddingVertical: 20,
+  },
+  manageTabletScreen: {
+    flex: 1,
+    backgroundColor: DSColors.background,
   },
   modalScrollContent: {
     flexGrow: 1,

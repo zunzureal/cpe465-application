@@ -1,14 +1,103 @@
 import React, { useEffect, useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { View, TextInput, Switch, StyleSheet, Pressable, Text, TouchableOpacity, useWindowDimensions, Modal, ScrollView } from 'react-native';
-import { LineChart } from 'react-native-chart-kit';
-const AnyLineChart = LineChart as any;
+import { View, TextInput, Switch, StyleSheet, Pressable, Text, TouchableOpacity, useWindowDimensions, Modal, ScrollView, Platform } from 'react-native';
+import Svg, { Circle, Defs, LinearGradient, Line, Path, Stop, Text as SvgText } from 'react-native-svg';
 import { useLocalSearchParams } from 'expo-router';
 import { DSColors, DSLayout, DSShape, DSShadowSoft, DSTypography } from '@/constants/design-system';
 import { useAuth } from '@/contexts/AuthContext';
 import { putPatientPreset, getDoctorPatient, getPatientPreset, getPatientSessions } from '@/services/apiClient';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+
+type ChartPoint = {
+  x: number;
+  y: number;
+};
+
+function buildLinePath(points: ChartPoint[]) {
+  if (points.length === 0) return '';
+  if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
+
+  const commands: string[] = [`M ${points[0].x} ${points[0].y}`];
+  for (let i = 1; i < points.length; i += 1) {
+    const previous = points[i - 1];
+    const current = points[i];
+    const controlX = (previous.x + current.x) / 2;
+    commands.push(`C ${controlX} ${previous.y}, ${controlX} ${current.y}, ${current.x} ${current.y}`);
+  }
+  return commands.join(' ');
+}
+
+function buildAreaPath(points: ChartPoint[], baseY: number) {
+  if (points.length === 0) return '';
+  const linePath = buildLinePath(points);
+  const lastPoint = points[points.length - 1];
+  const firstPoint = points[0];
+  return `${linePath} L ${lastPoint.x} ${baseY} L ${firstPoint.x} ${baseY} Z`;
+}
+
+function formatChartValue(value: number) {
+  return String(Math.round(value));
+}
+function AndroidTabletProgressFallback({
+  sessions,
+  targetFlexion,
+}: {
+  sessions: any[];
+  targetFlexion: string;
+}) {
+  const { width: screenWidth } = useWindowDimensions();
+  const recent = sessions.slice(-7).reverse();
+  const targetValue = Number(targetFlexion) || 0;
+  const maxValue = Math.max(targetValue, ...recent.map((s) => Number(s?.actualMaxFlexion) || 0), 1);
+  const barWidth = Math.max(220, Math.min(520, screenWidth - 64));
+
+  return (
+    <View style={styles.androidTabletProgressWrap}>
+      <View style={styles.androidTabletProgressHeader}>
+        <Text style={styles.androidTabletProgressTitle}>Progress Summary</Text>
+        <Text style={styles.androidTabletProgressSubtitle}>Last 7 sessions</Text>
+      </View>
+
+      <View style={styles.androidTabletProgressLegend}>
+        <View style={styles.androidTabletLegendItem}>
+          <View style={[styles.androidTabletLegendDot, { backgroundColor: DSColors.primary }]} />
+          <Text style={styles.androidTabletLegendText}>Actual</Text>
+        </View>
+        <View style={styles.androidTabletLegendItem}>
+          <View style={[styles.androidTabletLegendDot, { backgroundColor: '#7DD3FC' }]} />
+          <Text style={styles.androidTabletLegendText}>Target</Text>
+        </View>
+      </View>
+
+      {recent.map((session, index) => {
+        const actualValue = Number(session?.actualMaxFlexion) || 0;
+        const sessionDate = new Date(session?.sessionDate);
+        const label = sessionDate.toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' });
+        const actualWidth = Math.max(6, (actualValue / maxValue) * barWidth);
+        const targetWidth = Math.max(6, (targetValue / maxValue) * barWidth);
+
+        return (
+          <View key={String(session?.id ?? index)} style={styles.androidTabletProgressCard}>
+            <View style={styles.androidTabletProgressRowTop}>
+              <Text style={styles.androidTabletProgressDate}>{label}</Text>
+              <Text style={styles.androidTabletProgressValue}>Actual {Math.round(actualValue)}° / Target {Math.round(targetValue)}°</Text>
+            </View>
+
+            <View style={styles.androidTabletProgressTrack}>
+              <View style={[styles.androidTabletProgressTarget, { width: targetWidth }]} />
+              <View style={[styles.androidTabletProgressActual, { width: actualWidth }]} />
+            </View>
+
+            <Text style={styles.androidTabletProgressInfo}>
+              {actualValue >= targetValue ? 'Reached target' : 'Below target'}
+            </Text>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
 
 export default function ManagePatientScreen({ patientIdProp, embedded = false, onClose }: { patientIdProp?: number; embedded?: boolean; onClose?: () => void } = {}) {
   const params = useLocalSearchParams();
@@ -17,6 +106,8 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
   const { authToken } = useAuth();
   const { width } = useWindowDimensions();
   const isNarrow = width < 600;
+  const isAndroidTablet = Platform.OS === 'android' && width >= 768;
+  const isCompactEmbedded = embedded && isNarrow;
   const [showStartPicker, setShowStartPicker] = useState(false);
   const [showEndPicker, setShowEndPicker] = useState(false);
 
@@ -284,43 +375,99 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
       </View>
 
       <ThemedText type="default" style={styles.sectionLabel}>PROGRESS — TARGET VS ACTUAL FLEXION (LAST 7 SESSIONS)</ThemedText>
-      <ThemedView style={[styles.chartCard, isNarrow ? { height: 140 } : {}]}>
+      <ThemedView style={[styles.chartCard, isNarrow ? styles.chartCardNarrow : {}]}>
         {sessions.length > 0 ? (
           (() => {
             const recent = sessions.slice(-7);
             const labels = recent.map((s) => new Date((s as any).sessionDate).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' }));
             const actuals = recent.map((s) => Number((s as any).actualMaxFlexion) || 0);
             const target = recent.map(() => Number(targetFlexion) || 0);
-            const chartWidth = Math.max(300, Math.min(900, width - (isNarrow ? 48 : 160)));
+            if (isAndroidTablet) {
+              return <AndroidTabletProgressFallback sessions={recent} targetFlexion={targetFlexion} />;
+            }
+
+            const dataMax = Math.max(...actuals, ...target, 1);
+            const dataMin = Math.max(0, Math.min(...actuals, ...target) - 5);
+            const chartWidth = isCompactEmbedded
+              ? Math.max(260, Math.min(440, width - 24))
+              : Math.max(280, Math.min(900, width - (isNarrow ? 32 : 160)));
+            const chartHeight = isCompactEmbedded ? 168 : isNarrow ? 176 : 180;
+            const paddingLeft = 34;
+            const paddingRight = 18;
+            const paddingTop = 16;
+            const paddingBottom = 34;
+            const innerWidth = chartWidth - paddingLeft - paddingRight;
+            const innerHeight = chartHeight - paddingTop - paddingBottom;
+            const range = Math.max(1, dataMax - dataMin);
+
+            const mapPoint = (value: number, index: number, total: number): ChartPoint => ({
+              x: paddingLeft + (total <= 1 ? innerWidth / 2 : (index / (total - 1)) * innerWidth),
+              y: paddingTop + (dataMax - value) / range * innerHeight,
+            });
+
+            const actualPoints = actuals.map((value, index) => mapPoint(value, index, actuals.length));
+            const targetPoints = target.map((value, index) => mapPoint(value, index, target.length));
+            const actualPath = buildLinePath(actualPoints);
+            const targetPath = buildLinePath(targetPoints);
+            const actualArea = buildAreaPath(actualPoints, paddingTop + innerHeight);
+            const targetArea = buildAreaPath(targetPoints, paddingTop + innerHeight);
+
             return (
-              <AnyLineChart
-                data={{ labels, datasets: [{ data: actuals }, { data: target }] }}
-                width={chartWidth}
-                height={isNarrow ? 120 : 160}
-                withDots
-                withShadow={false}
-                withInnerLines={false}
-                yAxisSuffix="°"
-                fromZero
-                chartConfig={{
-                  backgroundGradientFrom: '#ffffff',
-                  backgroundGradientTo: '#ffffff',
-                  decimalPlaces: 0,
-                  color: (opacity = 1) => `rgba(34, 120, 224, ${opacity})`,
-                  labelColor: (opacity = 1) => `rgba(76,76,76, ${opacity})`,
-                  propsForDots: { r: '4' },
-                  style: { borderRadius: 8 },
-                }}
-                bezier
-                style={{ alignSelf: 'center' }}
-                decorator={undefined}
-                segments={4}
-                withHorizontalLines={true}
-                withVerticalLines={false}
-                verticalLabelRotation={-30}
-                showBarTops={false}
-                accessible
-              />
+              <View style={{ width: '100%', alignItems: 'center' }}>
+                <Svg width={chartWidth} height={chartHeight}>
+                  <Defs>
+                    <LinearGradient id="actualFill" x1="0" y1="0" x2="0" y2="1">
+                      <Stop offset="0%" stopColor={DSColors.primary} stopOpacity="0.18" />
+                      <Stop offset="100%" stopColor={DSColors.primary} stopOpacity="0.02" />
+                    </LinearGradient>
+                    <LinearGradient id="targetFill" x1="0" y1="0" x2="0" y2="1">
+                      <Stop offset="0%" stopColor="#7DD3FC" stopOpacity="0.16" />
+                      <Stop offset="100%" stopColor="#7DD3FC" stopOpacity="0.02" />
+                    </LinearGradient>
+                  </Defs>
+
+                  {[0, 0.25, 0.5, 0.75, 1].map((step) => {
+                    const y = paddingTop + innerHeight * step;
+                    const value = Math.round(dataMax - range * step);
+                    return (
+                      <React.Fragment key={String(step)}>
+                        <Line x1={paddingLeft} y1={y} x2={chartWidth - paddingRight} y2={y} stroke={DSColors.borderLight} strokeWidth="1" opacity="0.8" />
+                        <SvgText x={paddingLeft - 8} y={y + 4} fontSize="10" fill={DSColors.text.secondary} textAnchor="end">
+                          {formatChartValue(value)}°
+                        </SvgText>
+                      </React.Fragment>
+                    );
+                  })}
+
+                  <Path d={actualArea} fill="url(#actualFill)" />
+                  <Path d={targetArea} fill="url(#targetFill)" />
+                  {targetPath ? <Path d={targetPath} stroke="#7DD3FC" strokeWidth="2.5" fill="none" strokeDasharray="6 4" /> : null}
+                  {actualPath ? <Path d={actualPath} stroke={DSColors.primary} strokeWidth="3" fill="none" /> : null}
+
+                  {actualPoints.map((point, index) => (
+                    <Circle key={`actual-${index}`} cx={point.x} cy={point.y} r="4" fill={DSColors.primary} />
+                  ))}
+                  {targetPoints.map((point, index) => (
+                    <Circle key={`target-${index}`} cx={point.x} cy={point.y} r="3.5" fill="#7DD3FC" />
+                  ))}
+
+                  {labels.map((label, index) => {
+                    const x = mapPoint(0, index, labels.length).x;
+                    return (
+                      <SvgText
+                        key={label}
+                        x={x}
+                        y={chartHeight - 10}
+                        fontSize="10"
+                        fill={DSColors.text.secondary}
+                        textAnchor="middle"
+                      >
+                        {label}
+                      </SvgText>
+                    );
+                  })}
+                </Svg>
+              </View>
             );
           })()
         ) : (
@@ -439,6 +586,100 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     ...DSShadowSoft,
+  },
+  chartCardNarrow: {
+    height: 180,
+  },
+  androidTabletProgressWrap: {
+    width: '100%',
+    paddingHorizontal: 12,
+    paddingTop: 6,
+    paddingBottom: 10,
+    gap: 10,
+  },
+  androidTabletProgressHeader: {
+    marginBottom: 4,
+  },
+  androidTabletProgressTitle: {
+    ...DSTypography.bodyBold,
+    color: DSColors.text.primary,
+  },
+  androidTabletProgressSubtitle: {
+    ...DSTypography.caption,
+    color: DSColors.text.secondary,
+    marginTop: 2,
+  },
+  androidTabletProgressLegend: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    marginBottom: 4,
+  },
+  androidTabletLegendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  androidTabletLegendDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  androidTabletLegendText: {
+    ...DSTypography.caption,
+    color: DSColors.text.secondary,
+  },
+  androidTabletProgressCard: {
+    borderWidth: 1,
+    borderColor: DSColors.border,
+    borderRadius: DSShape.radiusButton,
+    padding: 10,
+    backgroundColor: DSColors.surface,
+    gap: 8,
+  },
+  androidTabletProgressRowTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 8,
+    alignItems: 'flex-start',
+  },
+  androidTabletProgressDate: {
+    ...DSTypography.bodyBold,
+    color: DSColors.text.primary,
+  },
+  androidTabletProgressValue: {
+    ...DSTypography.captionBold,
+    color: DSColors.text.secondary,
+    textAlign: 'right',
+    flexShrink: 1,
+  },
+  androidTabletProgressTrack: {
+    height: 12,
+    borderRadius: 999,
+    backgroundColor: DSColors.borderLight,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  androidTabletProgressTarget: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: '#7DD3FC',
+    opacity: 0.35,
+    borderRadius: 999,
+  },
+  androidTabletProgressActual: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: DSColors.primary,
+    borderRadius: 999,
+  },
+  androidTabletProgressInfo: {
+    ...DSTypography.caption,
+    color: DSColors.text.secondary,
   },
   empty: {
     color: DSColors.text.secondary,
@@ -564,9 +805,12 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   saveFooterEmbedded: {
-    backgroundColor: DSColors.danger,
+    backgroundColor: DSColors.surface,
+    borderTopColor: DSColors.borderLight,
   },
   saveButton: {
     width: '100%',
+    maxWidth: 520,
+    alignSelf: 'center',
   },
 });
