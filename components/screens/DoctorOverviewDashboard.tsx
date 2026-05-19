@@ -9,6 +9,7 @@ import { Ionicons } from '@expo/vector-icons';
 import {
   ActivityIndicator,
   FlatList,
+  KeyboardAvoidingView,
   Platform,
   Pressable,
   TouchableOpacity,
@@ -295,15 +296,20 @@ export function DoctorOverviewDashboard() {
         {/* Add Patient Modal */}
         <Modal visible={showAddModal} animationType="slide" onRequestClose={() => setShowAddModal(false)}>
           <SafeAreaView style={{ flex: 1 }}>
-            <ThemedView style={styles.addModalShell}>
-              <ScrollView
-                style={styles.addModalBody}
-                contentContainerStyle={[styles.addModalScroll, { padding: DSLayout.screenPadding }]}
-                keyboardShouldPersistTaps="handled"
-                nestedScrollEnabled
-                showsVerticalScrollIndicator
-              >
-                <ThemedText type="title" style={{ marginBottom: 12, color: DSColors.text.primary }}>ข้อมูลผู้ป่วย (Patient Information)</ThemedText>
+            <KeyboardAvoidingView
+              style={styles.addModalKeyboardWrap}
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+              keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
+            >
+              <ThemedView style={styles.addModalShell}>
+                <ScrollView
+                  style={styles.addModalBody}
+                  contentContainerStyle={[styles.addModalScroll, { padding: DSLayout.screenPadding }]}
+                  keyboardShouldPersistTaps="handled"
+                  nestedScrollEnabled
+                  showsVerticalScrollIndicator
+                >
+                  <ThemedText type="title" style={{ marginBottom: 12, color: DSColors.text.primary }}>ข้อมูลผู้ป่วย (Patient Information)</ThemedText>
 
                 <View style={styles.rowSplit}>
                   <View style={{ flex: 1, marginRight: 8 }}>
@@ -343,30 +349,31 @@ export function DoctorOverviewDashboard() {
                   <Text style={{ color: newSurgeryLocation ? DSColors.text.primary : DSColors.text.secondary }}>{newSurgeryLocation || '— เลือกบริเวณ —'}</Text>
                 </Pressable>
 
-                <ThemedText type="subtitle" style={{ marginTop: 10, marginBottom: 6, color: DSColors.text.primary }}>เลือกเครื่องกายภาพ (Assign Machine)</ThemedText>
-                <Pressable style={styles.selectBox} onPress={() => openPicker('machine')}>
-                  <Text style={{ color: newMachine ? DSColors.text.primary : DSColors.text.secondary }}>{newMachine || '— เลือกเครื่อง —'}</Text>
-                </Pressable>
-              </ScrollView>
+                  <ThemedText type="subtitle" style={{ marginTop: 10, marginBottom: 6, color: DSColors.text.primary }}>เลือกเครื่องกายภาพ (Assign Machine)</ThemedText>
+                  <Pressable style={styles.selectBox} onPress={() => openPicker('machine')}>
+                    <Text style={{ color: newMachine ? DSColors.text.primary : DSColors.text.secondary }}>{newMachine || '— เลือกเครื่อง —'}</Text>
+                  </Pressable>
+                </ScrollView>
 
-              <View style={styles.addModalActionsFooter}>
-                <View style={styles.addModalActions}>
-                <Pressable
-                  onPress={() => setShowAddModal(false)}
-                  style={({ pressed }) => [styles.outlineButton, pressed && styles.pressed]}
-                >
-                  <Text style={styles.outlineButtonText}>ยกเลิก</Text>
-                </Pressable>
+                <View style={styles.addModalActionsFooter}>
+                  <View style={styles.addModalActions}>
+                  <Pressable
+                    onPress={() => setShowAddModal(false)}
+                    style={({ pressed }) => [styles.outlineButton, pressed && styles.pressed]}
+                  >
+                    <Text style={styles.outlineButtonText}>ยกเลิก</Text>
+                  </Pressable>
 
-                <Pressable
-                  onPress={handleAddPatient}
-                  style={({ pressed }) => [styles.primaryButton, pressed && styles.primaryPressed]}
-                >
-                  <Text style={styles.primaryButtonText}>บันทึก</Text>
-                </Pressable>
+                  <Pressable
+                    onPress={handleAddPatient}
+                    style={({ pressed }) => [styles.primaryButton, pressed && styles.primaryPressed]}
+                  >
+                    <Text style={styles.primaryButtonText}>บันทึก</Text>
+                  </Pressable>
+                  </View>
                 </View>
-              </View>
-            </ThemedView>
+              </ThemedView>
+            </KeyboardAvoidingView>
           </SafeAreaView>
         </Modal>
 
@@ -657,6 +664,10 @@ const styles = StyleSheet.create({
   addModalShell: {
     flex: 1,
     backgroundColor: DSColors.surface,
+    position: 'relative',
+  },
+  addModalKeyboardWrap: {
+    flex: 1,
   },
   addModalBody: {
     flex: 1,
@@ -664,7 +675,7 @@ const styles = StyleSheet.create({
   },
   addModalScroll: {
     backgroundColor: DSColors.surface,
-    paddingBottom: 24,
+    paddingBottom: 120,
   },
   input: {
     borderWidth: 1,
@@ -677,15 +688,25 @@ const styles = StyleSheet.create({
   },
   addModalActions: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: 12,
+    justifyContent: 'space-between',
+    gap: 10,
     paddingHorizontal: DSLayout.screenPadding,
     paddingVertical: 12,
     backgroundColor: DSColors.surface,
   },
   addModalActionsFooter: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
     borderTopWidth: 1,
     borderTopColor: DSColors.borderLight,
+    backgroundColor: DSColors.surface,
+    zIndex: 10,
+    ...Platform.select({
+      android: { elevation: 4 },
+      default: {},
+    }),
   },
   pickerOverlay: {
     flex: 1,
@@ -780,29 +801,32 @@ const styles = StyleSheet.create({
     paddingBottom: 24,
   },
   outlineButton: {
+    flex: 1,
     borderWidth: 1,
     borderColor: DSColors.border,
     paddingVertical: 10,
     paddingHorizontal: 12,
     borderRadius: DSShape.radiusButton,
     backgroundColor: DSColors.surface,
-    marginRight: 8,
+    alignItems: 'center',
   },
   outlineButtonText: {
     color: DSColors.text.primary,
     fontWeight: '600',
   },
   primaryButton: {
+    flex: 1,
     backgroundColor: DSColors.primary,
     paddingVertical: 10,
     paddingHorizontal: 14,
     borderRadius: DSShape.radiusButton,
+    alignItems: 'center',
   },
   primaryPressed: {
     backgroundColor: DSColors.primaryDark,
   },
   primaryButtonText: {
-    color: DSColors.text.inverse,
+    color: DSColors.text.primary,
     fontWeight: '700',
   },
   pressed: { opacity: 0.8 },
