@@ -1,21 +1,26 @@
 /**
  * Centralized API client for CPE465 backend.
  * Handles all HTTP requests with proper error handling and configuration.
+ * Backend: cpe465-server (Node.js/Express + Supabase)
+ * Default port: 8080 (see backend/cpe465-server/.env)
  */
 
 import { Platform } from 'react-native';
 
+const CLOUD_RUN_API_BASE = 'https://project-465-service-649507438534.asia-southeast1.run.app';
+
 // Priority:
-// 1) EXPO_PUBLIC_API_BASE_URL (recommended; supports real device + any env)
-// 2) Platform defaults for local development
+// 1) EXPO_PUBLIC_API_BASE_URL (recommended; set in .env.local for network access)
+// 2) Cloud Run shared backend
+// 3) Platform defaults for local development
 export const API_BASE =
   process.env.EXPO_PUBLIC_API_BASE_URL?.replace(/\/$/, '') ||
-  // Backend in this workspace is usually available at port 8080 for local dev
+  CLOUD_RUN_API_BASE ||
   (Platform.OS === 'android' ? 'http://10.0.2.2:8080' : 'http://localhost:8080');
 
 type FetchOptions = {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
-  body?: Record<string, unknown>;
+  body?: unknown;
   headers?: Record<string, string>;
 };
 

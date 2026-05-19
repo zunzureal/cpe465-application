@@ -494,7 +494,7 @@ export function PatientHomeDashboard() {
   const [sessionCountsByDate, setSessionCountsByDate] = useState<Record<string, number>>({});
   const [sessionStatusesByDate, setSessionStatusesByDate] = useState<Record<string, SessionStatus[]>>({});
   const [weeklyPlan, setWeeklyPlan] = useState<Record<string, DayPlan>>({});
-  const { patientId } = useAuth();
+  const { patientId, patientName, identifier } = useAuth();
 
   useEffect(() => {
     if (!patientId) {

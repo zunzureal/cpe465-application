@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { View, TextInput, Switch, StyleSheet, FlatList, Pressable, Text, TouchableOpacity, useWindowDimensions, Modal } from 'react-native';
+import { View, TextInput, Switch, StyleSheet, Pressable, Text, TouchableOpacity, useWindowDimensions, Modal, ScrollView } from 'react-native';
 import { LineChart } from 'react-native-chart-kit';
+const AnyLineChart = LineChart as any;
 import { useLocalSearchParams } from 'expo-router';
 import { DSColors, DSLayout, DSShape, DSShadowSoft, DSTypography } from '@/constants/design-system';
 import { useAuth } from '@/contexts/AuthContext';
@@ -77,7 +78,10 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
   }, [patientId]);
 
   async function handleSave() {
-    if (!authToken) return;
+    if (!authToken) {
+      alert('ไม่พบสิทธิ์การใช้งาน กรุณาเข้าสู่ระบบใหม่');
+      return;
+    }
     setIsSaving(true);
     try {
       // validate dates and sessions
@@ -110,11 +114,11 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
       setPlanError(null);
       const days = daysOfWeek.reduce<number[]>((acc, v, i) => (v ? acc.concat(i) : acc), []);
       const payload: any = {
-        targetFlexion: Number(targetFlexion) || 120,
-        targetExtension: Number(targetExtension) || 0,
-        speedLevel: Number(speedLevel) || 5,
-        durationMinutes: Number(durationMinutes) || 10,
-        useWarmup: Boolean(useWarmup),
+        flexion: Number(targetFlexion) || 120,
+        extension: Number(targetExtension) || 0,
+        speed: Number(speedLevel) || 5,
+        duration: Number(durationMinutes) || 10,
+        warmUp: Boolean(useWarmup),
         targetForceN: targetForceN ? Number(targetForceN) : null,
         forceLevel: forceLevel ? Number(forceLevel) : null,
         startDate: planStart || undefined,
@@ -179,197 +183,194 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
     );
   }
 
-  return (
-    <SafeAreaView style={{ flex: embedded ? 0 : 1, backgroundColor: embedded ? 'transparent' : undefined }}>
-      <ThemedView style={[styles.container, embedded && styles.embeddedContainer]}>
-        <View style={styles.headerRow}>
-          <ThemedText type="title" style={styles.heading}>{'จัดการแผนผู้ป่วย #'}{patientId}</ThemedText>
-          {onClose && (
-            <Pressable onPress={onClose} style={styles.closeButton}>
-              <Text style={styles.closeButtonText}>ปิด</Text>
+  const body = (
+    <View style={[styles.container, embedded && styles.embeddedContainer, styles.bodyContainer]}>
+      <View style={styles.headerRow}>
+        <ThemedText type="title" style={styles.heading}>{'จัดการแผนผู้ป่วย #'}{patientId}</ThemedText>
+        {onClose && (
+          <Pressable onPress={onClose} style={styles.closeButton}>
+            <Text style={styles.closeButtonText}>ปิด</Text>
+          </Pressable>
+        )}
+      </View>
+      {patientName && <ThemedText type="default" style={styles.meta}>ชื่อ: {patientName}</ThemedText>}
+      {patientHn && <ThemedText type="default" style={styles.meta}>HN: {patientHn}</ThemedText>}
+
+      <View style={{ height: 8 }} />
+      <ThemedText type="subtitle" style={{ marginBottom: 8, color: DSColors.text.primary }}>Weekly Plan</ThemedText>
+      <View style={{ flexDirection: isNarrow ? 'column' : 'row', gap: 8, marginBottom: 8 }}>
+        <View style={{ flex: 1 }}>
+          <Text>Start Date</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <Pressable onPress={() => setShowStartPicker(true)} style={[styles.input, { flex: 1, justifyContent: 'center' }]}>
+              <Text style={{ color: planStart ? DSColors.text.primary : DSColors.text.secondary }}>{planStart || 'YYYY-MM-DD'}</Text>
             </Pressable>
-          )}
+            <Pressable onPress={() => { const d = new Date(); setPlanStart(d.toISOString().slice(0,10)); setPlanError(null); }} style={[styles.outlineButton, { marginLeft: 8 }]}>
+              <Text style={styles.outlineButtonText}>Today</Text>
+            </Pressable>
+          </View>
         </View>
-        {patientName && <ThemedText type="default" style={styles.meta}>ชื่อ: {patientName}</ThemedText>}
-        {patientHn && <ThemedText type="caption" style={styles.meta}>HN: {patientHn}</ThemedText>}
+        <View style={{ flex: 1 }}>
+          <Text>End Date</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <Pressable onPress={() => setShowEndPicker(true)} style={[styles.input, { flex: 1, justifyContent: 'center' }]}>
+              <Text style={{ color: planEnd ? DSColors.text.primary : DSColors.text.secondary }}>{planEnd || 'YYYY-MM-DD'}</Text>
+            </Pressable>
+            <Pressable onPress={() => { const d = new Date(); setPlanEnd(d.toISOString().slice(0,10)); setPlanError(null); }} style={[styles.outlineButton, { marginLeft: 8 }]}>
+              <Text style={styles.outlineButtonText}>Today</Text>
+            </Pressable>
+          </View>
+        </View>
+      </View>
 
-        {/* Weekly plan controls (moved below name/HN) */}
-        <View style={{ height: 8 }} />
-        <ThemedText type="subtitle" style={{ marginBottom: 8, color: DSColors.text.primary }}>Weekly Plan</ThemedText>
-        <View style={{ flexDirection: isNarrow ? 'column' : 'row', gap: 8, marginBottom: 8 }}>
-          <View style={{ flex: 1 }}>
-            <Text>Start Date</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Pressable onPress={() => setShowStartPicker(true)} style={[styles.input, { flex: 1, justifyContent: 'center' }]}> 
-                <Text style={{ color: planStart ? DSColors.text.primary : DSColors.text.secondary }}>{planStart || 'YYYY-MM-DD'}</Text>
+      <View style={{ flexDirection: isNarrow ? 'column' : 'row', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+        <View style={isNarrow ? { width: '100%' } : { width: 160 }}>
+          <Text>Sessions / day</Text>
+          <TextInput value={sessionsPerDay} onChangeText={(t) => { setSessionsPerDay(t); setPlanError(null); }} style={styles.input} keyboardType="numeric" />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={{ marginBottom: 6 }}>Days of week</Text>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+            {['Su','Mo','Tu','We','Th','Fr','Sa'].map((label, idx) => (
+              <Pressable key={label} onPress={() => { const copy = [...daysOfWeek]; copy[idx] = !copy[idx]; setDaysOfWeek(copy); setPlanError(null); }} style={[styles.weekdayChip, daysOfWeek[idx] && styles.weekdayChipActive, { marginBottom: 6 }]}>
+                <Text style={[{ fontWeight: '600' }, daysOfWeek[idx] ? { color: DSColors.text.inverse } : { color: DSColors.text.primary }]}>{label}</Text>
               </Pressable>
-              <Pressable onPress={() => { const d = new Date(); setPlanStart(d.toISOString().slice(0,10)); setPlanError(null); }} style={[styles.outlineButton, { marginLeft: 8 }]}>
-                <Text style={styles.outlineButtonText}>Today</Text>
-              </Pressable>
-            </View>
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text>End Date</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Pressable onPress={() => setShowEndPicker(true)} style={[styles.input, { flex: 1, justifyContent: 'center' }]}> 
-                <Text style={{ color: planEnd ? DSColors.text.primary : DSColors.text.secondary }}>{planEnd || 'YYYY-MM-DD'}</Text>
-              </Pressable>
-              <Pressable onPress={() => { const d = new Date(); setPlanEnd(d.toISOString().slice(0,10)); setPlanError(null); }} style={[styles.outlineButton, { marginLeft: 8 }]}>
-                <Text style={styles.outlineButtonText}>Today</Text>
-              </Pressable>
-            </View>
+            ))}
           </View>
         </View>
+      </View>
 
-        <View style={{ flexDirection: isNarrow ? 'column' : 'row', gap: 8, alignItems: 'center', marginBottom: 12 }}>
-          <View style={isNarrow ? { width: '100%' } : { width: 160 }}>
-            <Text>Sessions / day</Text>
-            <TextInput value={sessionsPerDay} onChangeText={(t) => { setSessionsPerDay(t); setPlanError(null); }} style={styles.input} keyboardType="numeric" />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={{ marginBottom: 6 }}>Days of week</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-              {['Su','Mo','Tu','We','Th','Fr','Sa'].map((label, idx) => (
-                <Pressable key={label} onPress={() => { const copy = [...daysOfWeek]; copy[idx] = !copy[idx]; setDaysOfWeek(copy); setPlanError(null); }} style={[styles.weekdayChip, daysOfWeek[idx] && styles.weekdayChipActive, { marginBottom: 6 }] }>
-                  <Text style={[{ fontWeight: '600' }, daysOfWeek[idx] ? { color: DSColors.text.inverse } : { color: DSColors.text.primary }]}>{label}</Text>
-                </Pressable>
-              ))}
-            </View>
-          </View>
+      <DatePickerModal visible={showStartPicker} initial={planStart} onCancel={() => setShowStartPicker(false)} onConfirm={(iso) => { setPlanStart(iso); setShowStartPicker(false); setPlanError(null); }} />
+      <DatePickerModal visible={showEndPicker} initial={planEnd} onCancel={() => setShowEndPicker(false)} onConfirm={(iso) => { setPlanEnd(iso); setShowEndPicker(false); setPlanError(null); }} />
+
+      {planError && <ThemedText type="default" style={{ color: DSColors.danger, marginBottom: 8 }}>{planError}</ThemedText>}
+
+      <Text style={{ ...DSTypography.caption, marginBottom: 6 }}>PRESCRIPTION (PHASE 1)</Text>
+      <View style={{ flexDirection: isNarrow ? 'column' : 'row', gap: 8, marginBottom: 8 }}>
+        <View style={{ flex: 1 }}>
+          <Text>Target Flexion (°)</Text>
+          <TextInput value={targetFlexion} onChangeText={setTargetFlexion} style={styles.input} keyboardType="numeric" />
         </View>
-
-        <DatePickerModal visible={showStartPicker} initial={planStart} onCancel={() => setShowStartPicker(false)} onConfirm={(iso) => { setPlanStart(iso); setShowStartPicker(false); setPlanError(null); }} />
-        <DatePickerModal visible={showEndPicker} initial={planEnd} onCancel={() => setShowEndPicker(false)} onConfirm={(iso) => { setPlanEnd(iso); setShowEndPicker(false); setPlanError(null); }} />
-
-        {planError && <ThemedText type="default" style={{ color: DSColors.danger, marginBottom: 8 }}>{planError}</ThemedText>}
-
-        <Text style={{ ...DSTypography.caption, marginBottom: 6 }}>PRESCRIPTION (PHASE 1)</Text>
-        <View style={{ flexDirection: isNarrow ? 'column' : 'row', gap: 8, marginBottom: 8 }}>
-          <View style={{ flex: 1 }}>
-            <Text>Target Flexion (°)</Text>
-            <TextInput value={targetFlexion} onChangeText={setTargetFlexion} style={styles.input} keyboardType="numeric" />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text>Target Extension (°)</Text>
-            <TextInput value={targetExtension} onChangeText={setTargetExtension} style={styles.input} keyboardType="numeric" />
-          </View>
+        <View style={{ flex: 1 }}>
+          <Text>Target Extension (°)</Text>
+          <TextInput value={targetExtension} onChangeText={setTargetExtension} style={styles.input} keyboardType="numeric" />
         </View>
+      </View>
 
-        <View style={{ flexDirection: isNarrow ? 'column' : 'row', gap: 8, marginBottom: 8 }}>
-          <View style={{ flex: 1 }}>
-            <Text>Speed (1–10)</Text>
-            <TextInput value={speedLevel} onChangeText={setSpeedLevel} style={styles.input} keyboardType="numeric" />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text>Duration (min)</Text>
-            <TextInput value={durationMinutes} onChangeText={setDurationMinutes} style={styles.input} keyboardType="numeric" />
-          </View>
-          <View style={isNarrow ? { width: '100%' } : { width: 120 }}>
-            <Text>Force Level (1–10)</Text>
-            <TextInput value={forceLevel} onChangeText={setForceLevel} style={styles.input} keyboardType="numeric" />
-          </View>
+      <View style={{ flexDirection: isNarrow ? 'column' : 'row', gap: 8, marginBottom: 8 }}>
+        <View style={{ flex: 1 }}>
+          <Text>Speed (1–10)</Text>
+          <TextInput value={speedLevel} onChangeText={setSpeedLevel} style={styles.input} keyboardType="numeric" />
         </View>
-
-        <Text style={{ marginBottom: 6 }}>Max Resistance Force (N)</Text>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-          <TextInput value={targetForceN} onChangeText={setTargetForceN} style={[styles.input, { flex: 1 }]} keyboardType="numeric" />
-          <Text style={{ width: 48 }}>{targetForceN} N</Text>
+        <View style={{ flex: 1 }}>
+          <Text>Duration (min)</Text>
+          <TextInput value={durationMinutes} onChangeText={setDurationMinutes} style={styles.input} keyboardType="numeric" />
         </View>
-
-        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-          <Switch value={useWarmup} onValueChange={setUseWarmup} />
-          <Text style={{ marginLeft: 8 }}>Warm-up mode</Text>
+        <View style={isNarrow ? { width: '100%' } : { width: 120 }}>
+          <Text>Force Level (1–10)</Text>
+          <TextInput value={forceLevel} onChangeText={setForceLevel} style={styles.input} keyboardType="numeric" />
         </View>
+      </View>
 
-        <View style={{ marginBottom: 18 }}>
+      <Text style={{ marginBottom: 6 }}>Max Resistance Force (N)</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <TextInput value={targetForceN} onChangeText={setTargetForceN} style={[styles.input, { flex: 1 }]} keyboardType="numeric" />
+        <Text style={{ width: 48 }}>{targetForceN} N</Text>
+      </View>
+
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+        <Switch value={useWarmup} onValueChange={setUseWarmup} />
+        <Text style={{ marginLeft: 8 }}>Warm-up mode</Text>
+      </View>
+
+      <ThemedText type="default" style={styles.sectionLabel}>PROGRESS — TARGET VS ACTUAL FLEXION (LAST 7 SESSIONS)</ThemedText>
+      <ThemedView style={[styles.chartCard, isNarrow ? { height: 140 } : {}]}>
+        {sessions.length > 0 ? (
+          (() => {
+            const recent = sessions.slice(-7);
+            const labels = recent.map((s) => new Date((s as any).sessionDate).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' }));
+            const actuals = recent.map((s) => Number((s as any).actualMaxFlexion) || 0);
+            const target = recent.map(() => Number(targetFlexion) || 0);
+            const chartWidth = Math.max(300, Math.min(900, width - (isNarrow ? 48 : 160)));
+            return (
+              <AnyLineChart
+                data={{ labels, datasets: [{ data: actuals }, { data: target }] }}
+                width={chartWidth}
+                height={isNarrow ? 120 : 160}
+                withDots
+                withShadow={false}
+                withInnerLines={false}
+                yAxisSuffix="°"
+                fromZero
+                chartConfig={{
+                  backgroundGradientFrom: '#ffffff',
+                  backgroundGradientTo: '#ffffff',
+                  decimalPlaces: 0,
+                  color: (opacity = 1) => `rgba(34, 120, 224, ${opacity})`,
+                  labelColor: (opacity = 1) => `rgba(76,76,76, ${opacity})`,
+                  propsForDots: { r: '4' },
+                  style: { borderRadius: 8 },
+                }}
+                bezier
+                style={{ alignSelf: 'center' }}
+                decorator={undefined}
+                segments={4}
+                withHorizontalLines={true}
+                withVerticalLines={false}
+                verticalLabelRotation={-30}
+                showBarTops={false}
+                accessible
+              />
+            );
+          })()
+        ) : (
+          <ThemedText type="default" style={{ color: DSColors.text.secondary }}>ไม่มีข้อมูลประวัติการบำบัดสำหรับแสดงกราฟ</ThemedText>
+        )}
+      </ThemedView>
+
+      <ThemedText type="default" style={styles.sectionLabel}>SESSION HISTORY</ThemedText>
+      {sessions.length === 0 ? (
+        <ThemedText type="default" style={styles.empty}>ยังไม่มีประวัติการบำบัด</ThemedText>
+      ) : (
+        <View>
+          {sessions.map((item) => (
+            <ThemedView key={String((item as any).id)} style={styles.sessionRow}>
+              <Text style={styles.sessionDate}>{new Date((item as any).sessionDate).toLocaleString()}</Text>
+              <Text style={styles.sessionText}>Actual Max Flexion: {(item as any).actualMaxFlexion}</Text>
+              <Text style={styles.sessionText}>Status: {(item as any).sessionStatus}</Text>
+            </ThemedView>
+          ))}
+        </View>
+      )}
+    </View>
+  );
+
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: embedded ? 'transparent' : undefined }}>
+      <View style={styles.screenShell}>
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={[styles.scrollContainer, embedded && styles.embeddedScrollContainer]}
+          keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled
+          showsVerticalScrollIndicator
+        >
+          {body}
+        </ScrollView>
+
+        <View style={[styles.saveFooter, embedded && styles.saveFooterEmbedded]}>
           <Pressable
             onPress={() => { if (!isSaving) handleSave(); }}
             style={({ pressed }) => [
               styles.primaryButton,
+              styles.saveButton,
               { opacity: isSaving ? 0.6 : pressed ? 0.85 : 1 },
             ]}
           >
             <Text style={styles.primaryButtonText}>{isSaving ? 'กำลังบันทึก...' : 'Save & Send to Machine'}</Text>
           </Pressable>
         </View>
-
-        <ThemedText type="caption" style={styles.sectionLabel}>PROGRESS — TARGET VS ACTUAL FLEXION (LAST 7 SESSIONS)</ThemedText>
-        <ThemedView style={[styles.chartCard, isNarrow ? { height: 140 } : {}]}>
-          {sessions.length > 0 ? (
-            (() => {
-              const recent = sessions.slice(-7);
-              const labels = recent.map((s) => new Date((s as any).sessionDate).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' }));
-              const actuals = recent.map((s) => Number((s as any).actualMaxFlexion) || 0);
-              const target = recent.map(() => Number(targetFlexion) || 0);
-              const chartWidth = Math.max(300, Math.min(900, width - (isNarrow ? 48 : 160)));
-              return (
-                <LineChart
-                  data={{ labels, datasets: [{ data: actuals }, { data: target }] }}
-                  width={chartWidth}
-                  height={isNarrow ? 120 : 160}
-                  withDots
-                  withShadow={false}
-                  withInnerLines={false}
-                  yAxisSuffix="°"
-                  fromZero
-                  chartConfig={{
-                    backgroundGradientFrom: '#ffffff',
-                    backgroundGradientTo: '#ffffff',
-                    decimalPlaces: 0,
-                    color: (opacity = 1) => `rgba(34, 120, 224, ${opacity})`,
-                    labelColor: (opacity = 1) => `rgba(76,76,76, ${opacity})`,
-                    propsForDots: { r: '4' },
-                    style: { borderRadius: 8 },
-                  }}
-                  bezier
-                  style={{ alignSelf: 'center' }}
-                  decorator={null}
-                  segments={4}
-                  withHorizontalLines={true}
-                  withVerticalLines={false}
-                  bezier
-                  verticalLabelRotation={-30}
-                  fromZero
-                  showBarTops={false}
-                  accessible
-                />
-              );
-            })()
-          ) : (
-            <ThemedText type="caption" style={{ color: DSColors.text.secondary }}>ไม่มีข้อมูลประวัติการบำบัดสำหรับแสดงกราฟ</ThemedText>
-          )}
-        </ThemedView>
-
-        <ThemedText type="caption" style={styles.sectionLabel}>SESSION HISTORY</ThemedText>
-        {sessions.length === 0 ? (
-          <ThemedText type="default" style={styles.empty}>ยังไม่มีประวัติการบำบัด</ThemedText>
-        ) : (
-          embedded ? (
-            <View>
-              {sessions.map((item) => (
-                <ThemedView key={String((item as any).id)} style={styles.sessionRow}>
-                  <Text style={styles.sessionDate}>{new Date((item as any).sessionDate).toLocaleString()}</Text>
-                  <Text style={styles.sessionText}>Actual Max Flexion: {(item as any).actualMaxFlexion}</Text>
-                  <Text style={styles.sessionText}>Status: {(item as any).sessionStatus}</Text>
-                </ThemedView>
-              ))}
-            </View>
-          ) : (
-            <FlatList
-              data={sessions}
-              keyExtractor={(s) => String((s as any).id)}
-              nestedScrollEnabled
-              renderItem={({ item }) => (
-                <ThemedView style={styles.sessionRow}>
-                  <Text style={styles.sessionDate}>{new Date((item as any).sessionDate).toLocaleString()}</Text>
-                  <Text style={styles.sessionText}>Actual Max Flexion: {(item as any).actualMaxFlexion}</Text>
-                  <Text style={styles.sessionText}>Status: {(item as any).sessionStatus}</Text>
-                </ThemedView>
-              )}
-            />
-          )
-        )}
-      </ThemedView>
+      </View>
     </SafeAreaView>
   );
 }
@@ -524,6 +525,10 @@ const styles = StyleSheet.create({
     color: DSColors.text.inverse,
     fontWeight: '700',
   },
+  outlineButtonText: {
+    color: DSColors.text.primary,
+    fontWeight: '700',
+  },
   outlineButton: {
     borderWidth: 1,
     borderColor: DSColors.border,
@@ -536,6 +541,32 @@ const styles = StyleSheet.create({
   embeddedContainer: {
     backgroundColor: 'transparent',
     padding: 0,
-    flex: 0,
+    flex: 1,
+  },
+  screenShell: {
+    flex: 1,
+  },
+  scrollContainer: {
+    flexGrow: 1,
+    paddingBottom: 24,
+  },
+  bodyContainer: {
+    width: '100%',
+  },
+  embeddedScrollContainer: {
+    justifyContent: 'flex-start',
+  },
+  saveFooter: {
+    borderTopWidth: 1,
+    borderTopColor: DSColors.borderLight,
+    backgroundColor: DSColors.background,
+    paddingHorizontal: DSLayout.screenPadding,
+    paddingVertical: 12,
+  },
+  saveFooterEmbedded: {
+    backgroundColor: DSColors.danger,
+  },
+  saveButton: {
+    width: '100%',
   },
 });

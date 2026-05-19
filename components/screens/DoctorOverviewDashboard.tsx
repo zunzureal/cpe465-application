@@ -9,7 +9,9 @@ import { Ionicons } from '@expo/vector-icons';
 import {
   ActivityIndicator,
   FlatList,
+  Platform,
   Pressable,
+  TouchableOpacity,
   StyleSheet,
   Text,
   TextInput,
@@ -22,7 +24,6 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-// Header is provided by the app Stack; do not render it inline here to avoid duplicates.
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 
@@ -44,12 +45,20 @@ type Patient = DoctorPatient & {
   program: string;
 };
 
+type AddPatientPicker = 'gender' | 'surgery' | 'machine' | null;
+
+type PickerOption = {
+  label: string;
+  value: string;
+};
+
 export function DoctorOverviewDashboard() {
   const [search, setSearch] = useState('');
   const [patients, setPatients] = useState<Patient[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
+  const isAndroid = Platform.OS === 'android';
   const { authToken } = useAuth();
   const isTablet = width >= 768;
 
@@ -66,6 +75,7 @@ export function DoctorOverviewDashboard() {
   const cardWidthPx = Math.min(maxCardWidth, Math.max(320, width - sideGap * 2));
   const overlayPaddingHorizontal = sideGap;
   const isSmall = width < 480;
+  const tabletListMaxHeight = isTablet ? Math.max(320, height - 250) : undefined;
   const contentPadding = Math.min(48, Math.max(12, Math.round(sideGap / 1.5)));
   const [showAddModal, setShowAddModal] = useState(false);
   const [showManageModal, setShowManageModal] = useState(false);
@@ -78,8 +88,52 @@ export function DoctorOverviewDashboard() {
   const [newGender, setNewGender] = useState('');
   const [newSurgeryLocation, setNewSurgeryLocation] = useState('');
   const [newMachine, setNewMachine] = useState('');
+  const [activePicker, setActivePicker] = useState<AddPatientPicker>(null);
 
   const router = useRouter();
+
+  const pickerTitleMap: Record<Exclude<AddPatientPicker, null>, string> = {
+    gender: 'เลือกเพศ',
+    surgery: 'เลือกบริเวณที่ผ่าตัด',
+    machine: 'เลือกเครื่องกายภาพ',
+  };
+
+  const pickerOptionsMap: Record<Exclude<AddPatientPicker, null>, PickerOption[]> = {
+    gender: [
+      { label: 'ชาย', value: 'ชาย' },
+      { label: 'หญิง', value: 'หญิง' },
+      { label: 'ไม่ระบุ', value: 'ไม่ระบุ' },
+    ],
+    surgery: [
+      { label: 'เข่าขวา', value: 'เข่าขวา' },
+      { label: 'เข่าซ้าย', value: 'เข่าซ้าย' },
+      { label: 'สะโพกขวา', value: 'สะโพกขวา' },
+      { label: 'สะโพกซ้าย', value: 'สะโพกซ้าย' },
+      { label: 'ไหล่', value: 'ไหล่' },
+      { label: 'อื่นๆ', value: 'อื่นๆ' },
+    ],
+    machine: [
+      { label: 'Machine A', value: 'Machine A' },
+      { label: 'Machine B', value: 'Machine B' },
+      { label: 'Machine C', value: 'Machine C' },
+      { label: 'Machine D', value: 'Machine D' },
+    ],
+  };
+
+  function openPicker(kind: Exclude<AddPatientPicker, null>) {
+    setActivePicker(kind);
+  }
+
+  function closePicker() {
+    setActivePicker(null);
+  }
+
+  function handlePickerSelect(value: string) {
+    if (activePicker === 'gender') setNewGender(value);
+    if (activePicker === 'surgery') setNewSurgeryLocation(value);
+    if (activePicker === 'machine') setNewMachine(value);
+    setActivePicker(null);
+  }
 
   // Fetch doctor's patients on mount
   async function fetchPatients() {
@@ -126,7 +180,7 @@ export function DoctorOverviewDashboard() {
     try {
       const fullName = `${newName.trim()} ${newLastName.trim()}`.trim();
       const payload = {
-        name: fullName || undefined,
+        name: fullName || '',
         hnCode: newHn.trim(),
         phoneNumber: newPhone.trim(),
         age: newAge ? Number(newAge) : undefined,
@@ -201,7 +255,6 @@ export function DoctorOverviewDashboard() {
           <ActivityIndicator size="large" color={DSColors.primary} />
           <Text style={styles.loadingText}>กำลังโหลดรายชื่อผู้ป่วย...</Text>
         </View>
-        
       </SafeAreaView>
     );
   }
@@ -221,13 +274,19 @@ export function DoctorOverviewDashboard() {
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <View style={[styles.container, isTablet && styles.containerTablet]}>
         {/* Header provided by RootLayout Stack */}
-        {/* button moved into patient list section for better layout */}
 
         {/* Add Patient Modal */}
         <Modal visible={showAddModal} animationType="slide" onRequestClose={() => setShowAddModal(false)}>
           <SafeAreaView style={{ flex: 1 }}>
-            <ThemedView style={[styles.addModal, { padding: DSLayout.screenPadding }]}>
-              <ThemedText type="title" style={{ marginBottom: 12, color: DSColors.text.primary }}>ข้อมูลผู้ป่วย (Patient Information)</ThemedText>
+            <ThemedView style={styles.addModalShell}>
+              <ScrollView
+                style={styles.addModalBody}
+                contentContainerStyle={[styles.addModalScroll, { padding: DSLayout.screenPadding }]}
+                keyboardShouldPersistTaps="handled"
+                nestedScrollEnabled
+                showsVerticalScrollIndicator
+              >
+                <ThemedText type="title" style={{ marginBottom: 12, color: DSColors.text.primary }}>ข้อมูลผู้ป่วย (Patient Information)</ThemedText>
 
                 <View style={styles.rowSplit}>
                   <View style={{ flex: 1, marginRight: 8 }}>
@@ -254,7 +313,7 @@ export function DoctorOverviewDashboard() {
                   </View>
                   <View style={{ flex: 1 }}>
                     <ThemedText type="subtitle" style={{ marginBottom: 6, color: DSColors.text.primary }}>เพศ (Gender)</ThemedText>
-                    <Pressable style={styles.selectBox} onPress={() => { /* future: open gender picker */ }}>
+                    <Pressable style={styles.selectBox} onPress={() => openPicker('gender')}>
                       <Text style={{ color: newGender ? DSColors.text.primary : DSColors.text.secondary }}>{newGender || '— เลือกเพศ —'}</Text>
                     </Pressable>
                   </View>
@@ -263,15 +322,18 @@ export function DoctorOverviewDashboard() {
                 <View style={{ height: 12 }} />
                 <ThemedText type="title" style={{ marginBottom: 12, color: DSColors.text.primary }}>ข้อมูลการรักษาและอุปกรณ์ (Treatment & Device)</ThemedText>
                 <ThemedText type="subtitle" style={{ marginBottom: 6, color: DSColors.text.primary }}>บริเวณที่ผ่าตัด (Surgery Type / Location)</ThemedText>
-                <Pressable style={styles.selectBox} onPress={() => { /* future: open surgery picker */ }}>
+                <Pressable style={styles.selectBox} onPress={() => openPicker('surgery')}>
                   <Text style={{ color: newSurgeryLocation ? DSColors.text.primary : DSColors.text.secondary }}>{newSurgeryLocation || '— เลือกบริเวณ —'}</Text>
                 </Pressable>
 
                 <ThemedText type="subtitle" style={{ marginTop: 10, marginBottom: 6, color: DSColors.text.primary }}>เลือกเครื่องกายภาพ (Assign Machine)</ThemedText>
-                <Pressable style={styles.selectBox} onPress={() => { /* future: open machine picker */ }}>
+                <Pressable style={styles.selectBox} onPress={() => openPicker('machine')}>
                   <Text style={{ color: newMachine ? DSColors.text.primary : DSColors.text.secondary }}>{newMachine || '— เลือกเครื่อง —'}</Text>
                 </Pressable>
-              <View style={styles.addModalActions}>
+              </ScrollView>
+
+              <View style={styles.addModalActionsFooter}>
+                <View style={styles.addModalActions}>
                 <Pressable
                   onPress={() => setShowAddModal(false)}
                   style={({ pressed }) => [styles.outlineButton, pressed && styles.pressed]}
@@ -285,9 +347,27 @@ export function DoctorOverviewDashboard() {
                 >
                   <Text style={styles.primaryButtonText}>บันทึก</Text>
                 </Pressable>
+                </View>
               </View>
             </ThemedView>
           </SafeAreaView>
+        </Modal>
+
+        <Modal visible={activePicker !== null} transparent animationType="fade" onRequestClose={closePicker}>
+          <Pressable style={styles.pickerOverlay} onPress={closePicker}>
+            <Pressable style={[styles.pickerCard, DSShadowSoft]} onPress={() => {}}>
+              <Text style={styles.pickerTitle}>{activePicker ? pickerTitleMap[activePicker] : ''}</Text>
+              {(activePicker ? pickerOptionsMap[activePicker] : []).map((option) => (
+                <Pressable
+                  key={option.value}
+                  style={({ pressed }) => [styles.pickerOption, pressed && styles.pickerOptionPressed]}
+                  onPress={() => handlePickerSelect(option.value)}
+                >
+                  <Text style={styles.pickerOptionText}>{option.label}</Text>
+                </Pressable>
+              ))}
+            </Pressable>
+          </Pressable>
         </Modal>
 
         {/* Summary cards */}
@@ -328,7 +408,8 @@ export function DoctorOverviewDashboard() {
             )}
           </View>
 
-          <View style={[styles.listCard, DSShadow]}>
+          <View style={[styles.listCardShadow, !isAndroid && DSShadow, isAndroid && isTablet && styles.androidTabletShadowFallback]}>
+            <View style={[styles.listCard, isTablet && { maxHeight: tabletListMaxHeight }, isAndroid && isTablet && styles.androidTabletListFallback]}>
             <FlatList
               data={filtered}
               keyExtractor={(item) => String(item.id)}
@@ -338,26 +419,33 @@ export function DoctorOverviewDashboard() {
                 </View>
               }
               renderItem={({ item }) => (
-                <Pressable onPress={() => { setManagePatientId(item.id); setShowManageModal(true); }}>
+                <TouchableOpacity
+                  onPress={() => { setManagePatientId(item.id); setShowManageModal(true); }}
+                  activeOpacity={0.7}
+                  style={styles.rowPressable}
+                >
                   <PatientRow item={item} />
-                </Pressable>
+                </TouchableOpacity>
               )}
               ItemSeparatorComponent={() => <View style={styles.separator} />}
               contentContainerStyle={filtered.length === 0 ? styles.listContentEmpty : undefined}
-              scrollEnabled={!isTablet}
+              scrollEnabled
+              nestedScrollEnabled
+              keyboardShouldPersistTaps="handled"
+              removeClippedSubviews={false}
+              style={styles.list}
             />
+            </View>
           </View>
           {/* Manage Patient Modal (popup) */}
           <Modal visible={showManageModal} animationType="none" transparent onRequestClose={() => setShowManageModal(false)}>
             <View style={[styles.modalOverlay, { paddingHorizontal: overlayPaddingHorizontal }] }>
               <View style={isSmall ? styles.modalCardFull : [styles.modalCardWrapper, { width: cardWidthPx }] }>
-                <ScrollView contentContainerStyle={styles.modalScrollContent}>
-                  {managePatientId !== null && (
-                    <View style={[styles.modalContentWrap, { paddingHorizontal: contentPadding }] }>
-                      <ManagePatientScreen patientIdProp={managePatientId} embedded onClose={() => setShowManageModal(false)} />
-                    </View>
-                  )}
-                </ScrollView>
+                {managePatientId !== null && (
+                  <View style={[styles.modalContentWrap, { paddingHorizontal: contentPadding }] }>
+                    <ManagePatientScreen patientIdProp={managePatientId} embedded onClose={() => setShowManageModal(false)} />
+                  </View>
+                )}
               </View>
             </View>
           </Modal>
@@ -381,9 +469,9 @@ function PatientRow({ item }: { item: Patient }) {
         <Ionicons name="person" size={22} color={DSColors.primary} />
       </View>
       <View style={styles.rowBody}>
-        <Text style={styles.rowName}>{item.name}</Text>
+        <Text style={styles.rowName}>{item.name?.trim() || 'ไม่ระบุชื่อผู้ป่วย'}</Text>
         <Text style={styles.rowProgram}>{item.program}</Text>
-        <Text style={styles.rowLast}>{item.lastSession}</Text>
+        {!!item.lastSession && <Text style={styles.rowLast}>{item.lastSession}</Text>}
       </View>
       <View style={[styles.statusChip, { backgroundColor: `${statusColor}18` }]}>
         <Text style={[styles.statusText, { color: statusColor }]}>{item.status}</Text>
@@ -396,6 +484,22 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: DSColors.background,
+  },
+  centerContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 32,
+  },
+  loadingText: {
+    ...DSTypography.body,
+    color: DSColors.text.secondary,
+    marginTop: 12,
+  },
+  errorText: {
+    ...DSTypography.body,
+    color: DSColors.danger,
+    marginTop: 12,
+    textAlign: 'center',
   },
   container: {
     flex: 1,
@@ -454,7 +558,7 @@ const styles = StyleSheet.create({
   },
   section: {
     flex: 1,
-    minHeight: 280,
+    minHeight: 0,
   },
   sectionTitle: {
     ...DSTypography.h3,
@@ -465,6 +569,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    rowGap: 8,
     marginBottom: 12,
   },
   searchWrap: {
@@ -487,9 +593,34 @@ const styles = StyleSheet.create({
   },
   listCard: {
     flex: 1,
+    minHeight: 260,
     backgroundColor: DSColors.surface,
     borderRadius: DSShape.radiusCard,
     overflow: 'hidden',
+  },
+  listCardShadow: {
+    flex: 1,
+    borderRadius: DSShape.radiusCard,
+    backgroundColor: DSColors.surface,
+    ...Platform.select({
+      android: { elevation: 2 },
+      default: {},
+    }),
+  },
+  // Android tablet fallback: disable elevation and avoid clipping artifacts
+  androidTabletShadowFallback: {
+    // remove elevation which can interact badly with overflow on some Android devices
+    elevation: 0,
+    // keep a neutral background so visual doesn't change
+    backgroundColor: DSColors.surface,
+  },
+  androidTabletListFallback: {
+    // remove rounded clipping to avoid rendering artifacts on Android tablets
+    borderRadius: 0,
+    overflow: 'visible',
+  },
+  list: {
+    flex: 1,
   },
   listContentEmpty: {
     flexGrow: 1,
@@ -506,6 +637,18 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: DSColors.surface,
   },
+  addModalShell: {
+    flex: 1,
+    backgroundColor: DSColors.surface,
+  },
+  addModalBody: {
+    flex: 1,
+    backgroundColor: DSColors.surface,
+  },
+  addModalScroll: {
+    backgroundColor: DSColors.surface,
+    paddingBottom: 24,
+  },
   input: {
     borderWidth: 1,
     borderColor: DSColors.border,
@@ -519,7 +662,48 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'flex-end',
     gap: 12,
-    marginTop: 8,
+    paddingHorizontal: DSLayout.screenPadding,
+    paddingVertical: 12,
+    backgroundColor: DSColors.surface,
+  },
+  addModalActionsFooter: {
+    borderTopWidth: 1,
+    borderTopColor: DSColors.borderLight,
+  },
+  pickerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: DSLayout.screenPadding,
+  },
+  pickerCard: {
+    width: '100%',
+    maxWidth: 420,
+    backgroundColor: DSColors.surface,
+    borderRadius: DSShape.radiusCard,
+    padding: DSLayout.screenPadding,
+  },
+  pickerTitle: {
+    ...DSTypography.h3,
+    color: DSColors.text.primary,
+    marginBottom: 12,
+  },
+  pickerOption: {
+    borderWidth: 1,
+    borderColor: DSColors.border,
+    borderRadius: DSShape.radiusButton,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    marginBottom: 8,
+    backgroundColor: DSColors.surface,
+  },
+  pickerOptionPressed: {
+    backgroundColor: DSColors.primaryLight,
+  },
+  pickerOptionText: {
+    ...DSTypography.body,
+    color: DSColors.text.primary,
   },
   addButton: {
     alignSelf: 'flex-start',
@@ -527,6 +711,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 14,
     borderRadius: 999,
+    marginLeft: 8,
   },
   addButtonText: {
     color: DSColors.text.inverse,
@@ -572,6 +757,7 @@ const styles = StyleSheet.create({
   },
   
   modalContentWrap: {
+    flex: 1,
     paddingTop: 24,
     paddingHorizontal: DSLayout.screenPadding,
     paddingBottom: 24,
@@ -618,8 +804,13 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
+    minHeight: 74,
     paddingVertical: 14,
     paddingHorizontal: DSLayout.cardPadding,
+    backgroundColor: DSColors.surface,
+  },
+  rowPressable: {
+    backgroundColor: DSColors.surface,
   },
   separator: {
     height: 1,
@@ -635,7 +826,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginRight: 12,
   },
-  rowBody: { flex: 1, minWidth: 0 },
+  rowBody: {
+    flex: 1,
+    minWidth: 0,
+    paddingRight: 10,
+  },
   rowName: {
     ...DSTypography.bodyBold,
     color: DSColors.text.primary,
