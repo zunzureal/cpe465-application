@@ -37,7 +37,7 @@ import {
   DSTypography,
 } from '@/constants/design-system';
 import { useAuth } from '@/contexts/AuthContext';
-import { getDoctorPatients, type DoctorPatient, createPatient, putPatientPreset } from '@/services/apiClient';
+import { getDoctorPatients, type DoctorPatient, createPatient, putPatientPreset, deletePatient, updatePatient } from '@/services/apiClient';
 // ManagePatientScreen is a separate route now — navigate to it instead of embedding
 
 type Patient = DoctorPatient & {
@@ -556,6 +556,107 @@ function PatientRow({ item }: { item: Patient }) {
         ? DSColors.success
         : DSColors.text.secondary;
 
+  // local UI state for actions
+  const [busy, setBusy] = useState(false);
+  const { authToken } = useAuth();
+  const router = useRouter();
+  const [confirmDeleteVisible, setConfirmDeleteVisible] = useState(false);
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editLastName, setEditLastName] = useState('');
+  const [editHn, setEditHn] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [editAge, setEditAge] = useState('');
+
+  // Open edit modal and pre-fill data
+  function openEditModal() {
+    const parts = item.name.trim().split(' ');
+    const firstName = parts[0] || '';
+    const lastName = parts.slice(1).join(' ') || '';
+    setEditName(firstName);
+    setEditLastName(lastName);
+    setEditHn(item.hnCode || '');
+    setEditPhone(item?.phoneNumber || '');
+    setEditAge(item?.age?.toString() || '');
+    setEditModalVisible(true);
+  }
+
+  async function handleSaveEdit() {
+    if (!authToken) {
+      alert('ไม่มีสิทธิ์');
+      return;
+    }
+    const fullName = `${editName.trim()} ${editLastName.trim()}`.trim();
+    if (!fullName) {
+      alert('กรุณากรอกชื่อและนามสกุล');
+      return;
+    }
+    const thaiOnly = /^[\u0E00-\u0E7F\s]+$/;
+    if (!thaiOnly.test(fullName)) {
+      alert('ชื่อและนามสกุลต้องเป็นตัวอักษรภาษาไทยเท่านั้น');
+      return;
+    }
+    if (!editHn.trim()) {
+      alert('กรุณากรอก Hospital Number (HN)');
+      return;
+    }
+    if (!editPhone.trim() || editPhone.trim().length !== 10) {
+      alert('กรุณากรอกเบอร์โทรศัพท์ให้ครบ 10 หลัก');
+      return;
+    }
+    const parsedAge = Number(editAge);
+    if (!editAge.trim() || Number.isNaN(parsedAge) || parsedAge < 0) {
+      alert('กรุณากรอกอายุเป็นตัวเลขบวก');
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const res = await updatePatient(authToken, item.id, {
+        name: fullName,
+        hnCode: editHn.trim(),
+        phoneNumber: editPhone.trim(),
+        age: parsedAge,
+      });
+      if (!res.success) {
+        alert(res.error || 'ไม่สามารถบันทึกการแก้ไขได้');
+      } else {
+        alert('บันทึกการแก้ไขเสร็จแล้ว');
+        setEditModalVisible(false);
+        // Refresh page to show updated data
+        router.replace(router.asPath);
+      }
+    } catch (err) {
+      console.error('[DoctorOverviewDashboard] Edit error:', err);
+      alert('เกิดข้อผิดพลาดในการแก้ไขข้อมูลผู้ป่วย');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!authToken) {
+      alert('ไม่มีสิทธิ์');
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await deletePatient(authToken, item.id);
+      if (!res.success) {
+        alert(res.error || 'ไม่สามารถลบผู้ป่วยได้ (backend may not support delete)');
+      } else {
+        // refresh list by emitting a navigation refresh (simpler) — rely on parent page to refetch on focus
+        router.replace(router.asPath);
+      }
+    } catch (err) {
+      console.error('[DoctorOverviewDashboard] Delete error:', err);
+      alert('เกิดข้อผิดพลาดในการลบผู้ป่วย');
+    } finally {
+      setBusy(false);
+      setConfirmDeleteVisible(false);
+    }
+  }
+
   return (
     <View style={styles.row}>
       <View style={styles.rowAvatar}>
@@ -568,6 +669,150 @@ function PatientRow({ item }: { item: Patient }) {
       </View>
       <View style={[styles.statusChip, { backgroundColor: `${statusColor}18` }]}>
         <Text style={[styles.statusText, { color: statusColor }]}>{item.status}</Text>
+      </View>
+
+      {/* Action icons: Edit and Delete */}
+      <View style={styles.rowActions}>
+        <Pressable
+          onPress={openEditModal}
+          style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
+          hitSlop={8}
+          accessibilityLabel="Edit patient"
+        >
+          <Ionicons name="pencil" size={18} color={DSColors.text.primary} />
+        </Pressable>
+
+        <Pressable
+          onPress={() => setConfirmDeleteVisible(true)}
+          style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
+          hitSlop={8}
+          accessibilityLabel="Delete patient"
+        >
+          <Ionicons name="trash" size={18} color={DSColors.danger} />
+        </Pressable>
+
+        {/* Edit Modal */}
+        <Modal visible={editModalVisible} animationType="slide" onRequestClose={() => setEditModalVisible(false)}>
+          <SafeAreaView style={{ flex: 1 }}>
+            <KeyboardAvoidingView
+              style={styles.addModalKeyboardWrap}
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+              keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
+            >
+              <ThemedView style={styles.addModalShell}>
+                <ScrollView
+                  style={styles.addModalBody}
+                  contentContainerStyle={[styles.addModalScroll, { padding: DSLayout.screenPadding }]}
+                  keyboardShouldPersistTaps="handled"
+                  nestedScrollEnabled
+                  showsVerticalScrollIndicator
+                >
+                  <ThemedText type="title" style={{ fontSize: 22, marginTop: 12, marginBottom: 24, color: DSColors.text.primary }}>แก้ไขข้อมูลผู้ป่วย</ThemedText>
+
+                  <View style={styles.rowSplit}>
+                    <View style={{ flex: 1, marginRight: 8 }}>
+                      <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>ชื่อ</ThemedText>
+                      <TextInput
+                        placeholder="ชื่อจริง"
+                        placeholderTextColor={DSColors.text.secondary}
+                        value={editName}
+                        onChangeText={(text) => {
+                          const sanitized = text.replace(/[^\u0E00-\u0E7F\s]/g, '');
+                          setEditName(sanitized);
+                        }}
+                        style={styles.input}
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>นามสกุล</ThemedText>
+                      <TextInput
+                        placeholder="นามสกุล"
+                        placeholderTextColor={DSColors.text.secondary}
+                        value={editLastName}
+                        onChangeText={(text) => {
+                          const sanitized = text.replace(/[^\u0E00-\u0E7F\s]/g, '');
+                          setEditLastName(sanitized);
+                        }}
+                        style={styles.input}
+                      />
+                    </View>
+                  </View>
+
+                  <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>รหัสผู้ป่วย (HN)</ThemedText>
+                  <TextInput placeholder="เช่น HN123456" placeholderTextColor={DSColors.text.secondary} value={editHn} onChangeText={setEditHn} style={styles.input} />
+
+                  <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>เบอร์โทรศัพท์ *</ThemedText>
+                  <TextInput
+                    placeholder="08XXXXXXXX"
+                    placeholderTextColor={DSColors.text.secondary}
+                    value={editPhone}
+                    onChangeText={(text) => {
+                      const digits = text.replace(/\D/g, '').slice(0, 10);
+                      setEditPhone(digits);
+                    }}
+                    maxLength={10}
+                    style={styles.input}
+                    keyboardType="phone-pad"
+                  />
+
+                  <View style={styles.rowSplit}>
+                    <View style={{ flex: 1, marginRight: 8 }}>
+                      <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>อายุ</ThemedText>
+                      <TextInput
+                        placeholder="เช่น 45"
+                        placeholderTextColor={DSColors.text.secondary}
+                        value={editAge}
+                        onChangeText={(text) => {
+                          const digits = text.replace(/\D/g, '');
+                          setEditAge(digits);
+                        }}
+                        keyboardType="numeric"
+                        style={styles.input}
+                      />
+                    </View>
+                  </View>
+                </ScrollView>
+
+                <View style={styles.addModalActionsFooter}>
+                  <View style={styles.addModalActions}>
+                    <Pressable
+                      onPress={() => setEditModalVisible(false)}
+                      style={({ pressed }) => [styles.outlineButton, pressed && styles.pressed]}
+                    >
+                      <Text style={styles.outlineButtonText}>ยกเลิก</Text>
+                    </Pressable>
+
+                    <Pressable
+                      onPress={handleSaveEdit}
+                      style={({ pressed }) => [styles.primaryButton, pressed && styles.primaryPressed]}
+                      disabled={busy}
+                    >
+                      <Text style={styles.primaryButtonText}>{busy ? 'กำลังบันทึก...' : 'บันทึก'}</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              </ThemedView>
+            </KeyboardAvoidingView>
+          </SafeAreaView>
+        </Modal>
+
+        {/* Delete Confirmation Modal */}
+        <Modal visible={confirmDeleteVisible} transparent animationType="fade" onRequestClose={() => setConfirmDeleteVisible(false)}>
+          <Pressable style={styles.modalOverlay} onPress={() => setConfirmDeleteVisible(false)}>
+            <View style={[styles.modalCardWrapper, { padding: DSLayout.screenPadding, width: 320 }]}>
+              <Text style={{ ...DSTypography.h3, color: DSColors.text.primary, marginBottom: 12 }}>ยืนยันการลบ</Text>
+              <Text style={{ ...DSTypography.body, color: DSColors.text.secondary, marginBottom: 20 }}>คุณแน่ใจว่าต้องการลบผู้ป่วยนี้หรือไม่? การกระทำนี้ไม่สามารถย้อนกลับได้</Text>
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <Pressable onPress={() => setConfirmDeleteVisible(false)} style={styles.outlineButton}>
+                  <Text style={styles.outlineButtonText}>ยกเลิก</Text>
+                </Pressable>
+                <Pressable onPress={handleDelete} style={[styles.primaryButton, busy && { opacity: 0.6 }]}>
+                  <Text style={styles.primaryButtonText}>{busy ? 'กำลังลบ...' : 'ลบ'}</Text>
+                </Pressable>
+              </View>
+            </View>
+          </Pressable>
+        </Modal>
       </View>
     </View>
   );
@@ -968,5 +1213,21 @@ const styles = StyleSheet.create({
   },
   statusText: {
     ...DSTypography.captionBold,
+  },
+  rowActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  iconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+    backgroundColor: DSColors.surface,
+    borderWidth: 1,
+    borderColor: DSColors.border,
   },
 });

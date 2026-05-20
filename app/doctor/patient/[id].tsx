@@ -1,13 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { View, TextInput, Switch, StyleSheet, Pressable, Text, TouchableOpacity, useWindowDimensions, Modal, ScrollView, Platform } from 'react-native';
+import { View, TextInput, Switch, StyleSheet, Pressable, Text, TouchableOpacity, useWindowDimensions, Modal, ScrollView, Platform, Dimensions } from 'react-native';
+import { LineChart } from 'react-native-chart-kit';
 import Svg, { Circle, Defs, LinearGradient, Line, Path, Stop, Text as SvgText } from 'react-native-svg';
 import { useLocalSearchParams } from 'expo-router';
 import { DSColors, DSLayout, DSShape, DSShadowSoft, DSTypography } from '@/constants/design-system';
 import { useAuth } from '@/contexts/AuthContext';
-import { putPatientPreset, getDoctorPatient, getPatientPreset, getPatientSessions } from '@/services/apiClient';
+import { putPatientPreset, getDoctorPatient, getPatientPreset, getPatientSessions, deleteTreatmentPlan } from '@/services/apiClient';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import DateTimePicker, { useDefaultStyles, type DateType } from 'react-native-calendars-datepicker';
 
 type ChartPoint = {
   x: number;
@@ -39,6 +41,47 @@ function buildAreaPath(points: ChartPoint[], baseY: number) {
 function formatChartValue(value: number) {
   return String(Math.round(value));
 }
+
+const TARGET_LINE_COLOR = '#7DD3FC';
+const ACTUAL_LINE_COLOR = DSColors.primary;
+
+const CHART_WIDTH = Dimensions.get('window').width - DSLayout.screenPadding * 2 - DSLayout.cardPadding * 2;
+const CHART_HEIGHT = Math.max(160, Math.min(200, Dimensions.get('window').width * 0.5));
+
+const makeChartConfig = (labelColor: string, gridColor: string) => ({
+  backgroundColor: DSColors.surface,
+  backgroundGradientFrom: DSColors.surface,
+  backgroundGradientTo: DSColors.surface,
+  decimalPlaces: 0,
+  color: (opacity = 1) => `rgba(160,0,0,${opacity * 0.25})`,
+  labelColor: () => labelColor,
+  style: { borderRadius: 16 },
+  propsForLabels: { fontSize: 13, fontWeight: '600' as const },
+  propsForBackgroundLines: { stroke: gridColor, strokeWidth: 0.6 },
+  fillShadowGradient: ACTUAL_LINE_COLOR,
+  fillShadowGradientOpacity: 0.08,
+  propsForDots: { r: '3' },
+});
+
+function clampNumber(rawValue: string, minValue: number, maxValue: number) {
+  const normalized = rawValue.replace(/[^0-9.-]/g, '');
+  if (normalized === '' || normalized === '-' || normalized === '.' || normalized === '-.') return normalized;
+  const numericValue = Number(normalized);
+  if (Number.isNaN(numericValue)) return '';
+  return String(Math.min(maxValue, Math.max(minValue, numericValue)));
+}
+
+function sanitizePositiveInteger(rawValue: string, maxDigits: number) {
+  return rawValue.replace(/\D/g, '').slice(0, maxDigits);
+}
+
+const REALISTIC_LIMITS = {
+  flexion: { min: 0, max: 180 },
+  extension: { min: -30, max: 30 },
+  speed: { min: 1, max: 10 },
+  forceLevel: { min: 1, max: 10 },
+} as const;
+
 function AndroidTabletProgressFallback({
   sessions,
   targetFlexion,
@@ -109,8 +152,7 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
   const isAndroidTablet = Platform.OS === 'android' && width >= 768;
   const effectiveEmbedded = embedded && !isAndroidTablet;
   const isCompactEmbedded = embedded && isNarrow;
-  const [showStartPicker, setShowStartPicker] = useState(false);
-  const [showEndPicker, setShowEndPicker] = useState(false);
+  const [showRangePicker, setShowRangePicker] = useState(false);
 
   const [planStart, setPlanStart] = useState('');
   const [planEnd, setPlanEnd] = useState('');
@@ -129,6 +171,31 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
   const [targetForceN, setTargetForceN] = useState<string>('70');
   const [useWarmup, setUseWarmup] = useState<boolean>(true);
   const [sessions, setSessions] = useState<any[]>([]);
+  const [showPlanModal, setShowPlanModal] = useState(false);
+  const [existingPlan, setExistingPlan] = useState<any>(null);
+  const [isEditingPlan, setIsEditingPlan] = useState(false);
+  const [isDeletingPlan, setIsDeletingPlan] = useState(false);
+  const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
+
+  // Compute which weekdays are present in the selected plan range (0=Sun..6=Sat)
+  function getAllowedWeekdays(start: string, end: string) {
+    const allowed = [false, false, false, false, false, false, false];
+    if (!start || !end) return allowed.map(() => true); // if no full range, allow all
+    const s = new Date(start);
+    const e = new Date(end);
+    if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime()) || s > e) return allowed.map(() => true);
+    // iterate from start to end inclusive
+    for (let d = new Date(s); d <= e; d.setDate(d.getDate() + 1)) {
+      allowed[d.getDay()] = true;
+    }
+    return allowed;
+  }
+
+  // When range changes, clear any selected weekdays that are no longer allowed
+  useEffect(() => {
+    const allowed = getAllowedWeekdays(planStart, planEnd);
+    setDaysOfWeek((prev) => prev.map((v, i) => (v && allowed[i] ? true : false)));
+  }, [planStart, planEnd]);
 
   useEffect(() => {
     // Could fetch existing preset for patient and populate fields. Skipping for MVP.
@@ -152,13 +219,16 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
       const presetRes = await getPatientPreset(patientId);
       if (presetRes.success && presetRes.data) {
         const p = presetRes.data;
-        setTargetFlexion(String(p.targetFlexion ?? 120));
-        setTargetExtension(String(p.targetExtension ?? 0));
-        setSpeedLevel(String(p.speedLevel ?? 5));
+        setExistingPlan(p);
+        setTargetFlexion(clampNumber(String(p.targetFlexion ?? 120), REALISTIC_LIMITS.flexion.min, REALISTIC_LIMITS.flexion.max));
+        setTargetExtension(clampNumber(String(p.targetExtension ?? 0), REALISTIC_LIMITS.extension.min, REALISTIC_LIMITS.extension.max));
+        setSpeedLevel(clampNumber(String(p.speedLevel ?? 5), REALISTIC_LIMITS.speed.min, REALISTIC_LIMITS.speed.max));
         setDurationMinutes(String(p.durationMinutes ?? 10));
         setUseWarmup(Boolean(p.useWarmup ?? true));
         setTargetForceN(String(p.targetForceN ?? 70));
-        setForceLevel(String(p.forceLevel ?? 1));
+        setForceLevel(clampNumber(String(p.forceLevel ?? 1), REALISTIC_LIMITS.forceLevel.min, REALISTIC_LIMITS.forceLevel.max));
+      } else {
+        setExistingPlan(null);
       }
 
       const sessRes = await getPatientSessions(patientId, { limit: 20 });
@@ -203,16 +273,45 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
         setIsSaving(false);
         return;
       }
+
+      const flexionValue = Number(targetFlexion);
+      if (Number.isNaN(flexionValue) || flexionValue < REALISTIC_LIMITS.flexion.min || flexionValue > REALISTIC_LIMITS.flexion.max) {
+        setPlanError(`Target Flexion must be between ${REALISTIC_LIMITS.flexion.min} and ${REALISTIC_LIMITS.flexion.max}`);
+        setIsSaving(false);
+        return;
+      }
+
+      const extensionValue = Number(targetExtension);
+      if (Number.isNaN(extensionValue) || extensionValue < REALISTIC_LIMITS.extension.min || extensionValue > REALISTIC_LIMITS.extension.max) {
+        setPlanError(`Target Extension must be between ${REALISTIC_LIMITS.extension.min} and ${REALISTIC_LIMITS.extension.max}`);
+        setIsSaving(false);
+        return;
+      }
+
+      const speedValue = Number(speedLevel);
+      if (Number.isNaN(speedValue) || speedValue < REALISTIC_LIMITS.speed.min || speedValue > REALISTIC_LIMITS.speed.max) {
+        setPlanError('Speed must be between 1 and 10');
+        setIsSaving(false);
+        return;
+      }
+
+      const forceLevelValue = Number(forceLevel);
+      if (Number.isNaN(forceLevelValue) || forceLevelValue < REALISTIC_LIMITS.forceLevel.min || forceLevelValue > REALISTIC_LIMITS.forceLevel.max) {
+        setPlanError('Force Level must be between 1 and 10');
+        setIsSaving(false);
+        return;
+      }
+
       setPlanError(null);
       const days = daysOfWeek.reduce<number[]>((acc, v, i) => (v ? acc.concat(i) : acc), []);
       const payload: any = {
-        flexion: Number(targetFlexion) || 120,
-        extension: Number(targetExtension) || 0,
-        speed: Number(speedLevel) || 5,
+        flexion: flexionValue,
+        extension: extensionValue,
+        speed: speedValue,
         duration: Number(durationMinutes) || 10,
         warmUp: Boolean(useWarmup),
         targetForceN: targetForceN ? Number(targetForceN) : null,
-        forceLevel: forceLevel ? Number(forceLevel) : null,
+        forceLevel: forceLevelValue,
         startDate: planStart || undefined,
         endDate: planEnd || undefined,
         sessionsPerDay: Number(sessionsPerDay) || 1,
@@ -238,41 +337,131 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
     }
   }
 
-  function DatePickerModal({ visible, initial, onCancel, onConfirm }: { visible: boolean; initial?: string; onCancel: () => void; onConfirm: (iso: string) => void }) {
-    const [y, setY] = useState('');
-    const [m, setM] = useState('');
-    const [d, setD] = useState('');
+  function DateRangePickerModal({
+    visible,
+    startDate,
+    endDate,
+    onCancel,
+    onConfirm,
+  }: {
+    visible: boolean;
+    startDate?: string;
+    endDate?: string;
+    onCancel: () => void;
+    onConfirm: (range: { startDate: string; endDate: string }) => void;
+  }) {
+    const defaultStyles = useDefaultStyles('light');
+    const [rangeStart, setRangeStart] = useState<DateType>(startDate || undefined);
+    const [rangeEnd, setRangeEnd] = useState<DateType>(endDate || undefined);
 
     useEffect(() => {
-      const src = initial ? new Date(initial) : new Date();
-      setY(String(src.getFullYear()));
-      setM(String(src.getMonth() + 1).padStart(2, '0'));
-      setD(String(src.getDate()).padStart(2, '0'));
-    }, [initial, visible]);
+      if (!visible) return;
+      setRangeStart(startDate || undefined);
+      setRangeEnd(endDate || undefined);
+    }, [visible, startDate, endDate]);
 
-    function confirm() {
-      const iso = `${y}-${String(Number(m)).padStart(2,'0')}-${String(Number(d)).padStart(2,'0')}`;
-      onConfirm(iso);
+    function toIso(value: DateType) {
+      if (!value) return '';
+      // If the picker already provided a YYYY-MM-DD string, return it directly
+      if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+      // Some picker implementations return a wrapper object (looks like { $d: Date }) — prefer that
+      let dObj: Date | null = null;
+      try {
+        if (value && typeof value === 'object' && ('$d' in (value as any)) && (value as any).$d instanceof Date) {
+          dObj = (value as any).$d as Date;
+        } else if (value && typeof value === 'object' && ('d' in (value as any)) && (value as any).d instanceof Date) {
+          dObj = (value as any).d as Date;
+        } else {
+          dObj = new Date(value as any);
+        }
+      } catch (err) {
+        dObj = new Date(value as any);
+      }
+      if (!dObj || Number.isNaN(dObj.getTime())) return '';
+      // Use local date parts so the displayed day matches what the user tapped
+      const y = dObj.getFullYear();
+      const m = String(dObj.getMonth() + 1).padStart(2, '0');
+      const day = String(dObj.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
     }
 
     return (
       <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
         <View style={styles.datePickerOverlay}>
-          <View style={styles.datePickerCard}>
-            <Text style={{ marginBottom: 8 }}>Select date</Text>
-            <View style={styles.datePickerRow}>
-              <TextInput style={styles.datePartInput} value={y} onChangeText={setY} keyboardType="numeric" maxLength={4} />
-              <TextInput style={styles.datePartInput} value={m} onChangeText={setM} keyboardType="numeric" maxLength={2} />
-              <TextInput style={styles.datePartInput} value={d} onChangeText={setD} keyboardType="numeric" maxLength={2} />
+          <View style={[styles.datePickerCard, { backgroundColor: '#fff' }]}>
+            <View style={{ marginBottom: 10 }}>
+              <Text style={{ fontWeight: '700', marginBottom: 4 }}>Select start and end</Text>
+              <Text style={{ color: DSColors.text.secondary, fontSize: 12 }}>
+                Tap the first date, then tap the last date to create a range.
+              </Text>
             </View>
+
+            <DateTimePicker
+              mode="range"
+              calendar="gregory"
+              startDate={rangeStart as DateType}
+              endDate={rangeEnd as DateType}
+              showOutsideDays
+              onChange={({ startDate: nextStartDate, endDate: nextEndDate }) => {
+                // Debug log to inspect raw picker values and types
+                try {
+                  // eslint-disable-next-line no-console
+                  console.log('DatePicker onChange raw:', { nextStartDate, nextEndDate, startType: typeof nextStartDate, endType: typeof nextEndDate });
+                } catch (err) {}
+
+                setRangeStart(nextStartDate || undefined);
+                setRangeEnd(nextEndDate || undefined);
+
+                if (nextStartDate && nextEndDate) {
+                  const s = toIso(nextStartDate);
+                  const e = toIso(nextEndDate);
+                  try {
+                    // eslint-disable-next-line no-console
+                    console.log('DatePicker converted:', { s, e });
+                  } catch (err) {}
+                  onConfirm({ startDate: s, endDate: e });
+                }
+              }}
+              styles={{
+                ...defaultStyles,
+                selected: { backgroundColor: DSColors.primary },
+                selected_label: { color: DSColors.text.inverse },
+                range_start: { backgroundColor: DSColors.primary },
+                range_end: { backgroundColor: DSColors.primary },
+                range_start_label: { color: DSColors.text.inverse },
+                range_end_label: { color: DSColors.text.inverse },
+                range_middle: { backgroundColor: `${DSColors.primary}22` },
+                today: { borderColor: DSColors.primary, borderWidth: 1 },
+              }}
+              style={{ width: '100%' }}
+            />
+
             <View style={styles.datePickerActions}>
-              <Pressable onPress={onCancel} style={styles.outlineButton}><Text style={styles.outlineButtonText}>Cancel</Text></Pressable>
-              <Pressable onPress={confirm} style={styles.primaryButton}><Text style={styles.primaryButtonText}>OK</Text></Pressable>
+              <Pressable
+                onPress={() => {
+                  setRangeStart(undefined);
+                  setRangeEnd(undefined);
+                  onConfirm({ startDate: '', endDate: '' });
+                }}
+                style={styles.outlineButton}
+              >
+                <Text style={styles.outlineButtonText}>Clear</Text>
+              </Pressable>
+              <Pressable onPress={onCancel} style={styles.outlineButton}>
+                <Text style={styles.outlineButtonText}>Close</Text>
+              </Pressable>
             </View>
           </View>
         </View>
       </Modal>
     );
+  }
+
+  function formatRangeLabel(startDate: string, endDate: string) {
+    if (!startDate && !endDate) return 'Select start and end';
+    if (startDate && !endDate) return `${startDate} - select end`;
+    if (!startDate && endDate) return `${endDate} - select start`;
+    return `${startDate} → ${endDate}`;
   }
 
   const body = (
@@ -289,30 +478,17 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
       {patientHn && <ThemedText type="default" style={styles.meta}>HN: {patientHn}</ThemedText>}
 
       <View style={{ height: 8 }} />
-      <ThemedText type="subtitle" style={{ marginBottom: 8, color: DSColors.text.primary }}>Weekly Plan</ThemedText>
-      <View style={{ flexDirection: isNarrow ? 'column' : 'row', gap: 8, marginBottom: 8 }}>
-        <View style={{ flex: 1 }}>
-          <Text>Start Date</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <Pressable onPress={() => setShowStartPicker(true)} style={[styles.input, { flex: 1, justifyContent: 'center' }]}>
-              <Text style={{ color: planStart ? DSColors.text.primary : DSColors.text.secondary }}>{planStart || 'YYYY-MM-DD'}</Text>
-            </Pressable>
-            <Pressable onPress={() => { const d = new Date(); setPlanStart(d.toISOString().slice(0,10)); setPlanError(null); }} style={[styles.outlineButton, { marginLeft: 8 }]}>
-              <Text style={styles.outlineButtonText}>Today</Text>
-            </Pressable>
-          </View>
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text>End Date</Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-            <Pressable onPress={() => setShowEndPicker(true)} style={[styles.input, { flex: 1, justifyContent: 'center' }]}>
-              <Text style={{ color: planEnd ? DSColors.text.primary : DSColors.text.secondary }}>{planEnd || 'YYYY-MM-DD'}</Text>
-            </Pressable>
-            <Pressable onPress={() => { const d = new Date(); setPlanEnd(d.toISOString().slice(0,10)); setPlanError(null); }} style={[styles.outlineButton, { marginLeft: 8 }]}>
-              <Text style={styles.outlineButtonText}>Today</Text>
-            </Pressable>
-          </View>
-        </View>
+      {/* <ThemedText type="subtitle" style={{ marginBottom: 8, color: DSColors.text.primary }}>Weekly Plan</ThemedText> */}
+      <View style={{ marginBottom: 8 }}>
+        <Text>Plan range</Text>
+        <Pressable
+          onPress={() => setShowRangePicker(true)}
+          style={[styles.input, { justifyContent: 'center', minHeight: 48 }]}
+        >
+          <Text style={{ color: planStart || planEnd ? DSColors.text.primary : DSColors.text.secondary }}>
+            {formatRangeLabel(planStart, planEnd)}
+          </Text>
+        </Pressable>
       </View>
 
       <View style={{ flexDirection: isNarrow ? 'column' : 'row', gap: 8, alignItems: 'center', marginBottom: 12 }}>
@@ -323,17 +499,51 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
         <View style={{ flex: 1 }}>
           <Text style={{ marginBottom: 6 }}>Days of week</Text>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-            {['Su','Mo','Tu','We','Th','Fr','Sa'].map((label, idx) => (
-              <Pressable key={label} onPress={() => { const copy = [...daysOfWeek]; copy[idx] = !copy[idx]; setDaysOfWeek(copy); setPlanError(null); }} style={[styles.weekdayChip, daysOfWeek[idx] && styles.weekdayChipActive, { marginBottom: 6 }]}>
-                <Text style={[{ fontWeight: '600' }, daysOfWeek[idx] ? { color: DSColors.text.inverse } : { color: DSColors.text.primary }]}>{label}</Text>
-              </Pressable>
-            ))}
+            {['Su','Mo','Tu','We','Th','Fr','Sa'].map((label, idx) => {
+              const allowed = getAllowedWeekdays(planStart, planEnd)[idx];
+              const isActive = daysOfWeek[idx];
+              return (
+                <Pressable
+                  key={label}
+                  onPress={() => {
+                    if (!allowed) return; // disable toggling if not in range
+                    const copy = [...daysOfWeek];
+                    copy[idx] = !copy[idx];
+                    setDaysOfWeek(copy);
+                    setPlanError(null);
+                  }}
+                  disabled={!allowed}
+                  style={[
+                    styles.weekdayChip,
+                    isActive && styles.weekdayChipActive,
+                    !allowed && styles.weekdayChipDisabled,
+                    { marginBottom: 6 },
+                  ]}
+                >
+                  <Text style={[{ fontWeight: '600' }, isActive ? { color: DSColors.text.inverse } : !allowed ? { color: DSColors.text.muted } : { color: DSColors.text.primary }]}>
+                    {label}
+                  </Text>
+                </Pressable>
+              );
+            })}
           </View>
         </View>
       </View>
 
-      <DatePickerModal visible={showStartPicker} initial={planStart} onCancel={() => setShowStartPicker(false)} onConfirm={(iso) => { setPlanStart(iso); setShowStartPicker(false); setPlanError(null); }} />
-      <DatePickerModal visible={showEndPicker} initial={planEnd} onCancel={() => setShowEndPicker(false)} onConfirm={(iso) => { setPlanEnd(iso); setShowEndPicker(false); setPlanError(null); }} />
+      <DateRangePickerModal
+        visible={showRangePicker}
+        startDate={planStart}
+        endDate={planEnd}
+        onCancel={() => setShowRangePicker(false)}
+        onConfirm={({ startDate, endDate }) => {
+          setPlanStart(startDate);
+          setPlanEnd(endDate);
+          setPlanError(null);
+          if (startDate || endDate) {
+            setShowRangePicker(false);
+          }
+        }}
+      />
 
       {planError && <ThemedText type="default" style={{ color: DSColors.danger, marginBottom: 8 }}>{planError}</ThemedText>}
 
@@ -341,18 +551,36 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
       <View style={{ flexDirection: isNarrow ? 'column' : 'row', gap: 8, marginBottom: 8 }}>
         <View style={{ flex: 1 }}>
           <Text>Target Flexion (°)</Text>
-          <TextInput value={targetFlexion} onChangeText={setTargetFlexion} style={styles.input} keyboardType="numeric" />
+          <TextInput
+            value={targetFlexion}
+            onChangeText={(value) => setTargetFlexion(clampNumber(value, REALISTIC_LIMITS.flexion.min, REALISTIC_LIMITS.flexion.max))}
+            style={styles.input}
+            keyboardType="numeric"
+            maxLength={3}
+          />
         </View>
         <View style={{ flex: 1 }}>
           <Text>Target Extension (°)</Text>
-          <TextInput value={targetExtension} onChangeText={setTargetExtension} style={styles.input} keyboardType="numeric" />
+          <TextInput
+            value={targetExtension}
+            onChangeText={(value) => setTargetExtension(clampNumber(value, REALISTIC_LIMITS.extension.min, REALISTIC_LIMITS.extension.max))}
+            style={styles.input}
+            keyboardType="numeric"
+            maxLength={4}
+          />
         </View>
       </View>
 
       <View style={{ flexDirection: isNarrow ? 'column' : 'row', gap: 8, marginBottom: 8 }}>
         <View style={{ flex: 1 }}>
           <Text>Speed (1–10)</Text>
-          <TextInput value={speedLevel} onChangeText={setSpeedLevel} style={styles.input} keyboardType="numeric" />
+          <TextInput
+            value={speedLevel}
+            onChangeText={(value) => setSpeedLevel(clampNumber(value, REALISTIC_LIMITS.speed.min, REALISTIC_LIMITS.speed.max))}
+            style={styles.input}
+            keyboardType="numeric"
+            maxLength={2}
+          />
         </View>
         <View style={{ flex: 1 }}>
           <Text>Duration (min)</Text>
@@ -360,7 +588,13 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
         </View>
         <View style={isNarrow ? { width: '100%' } : { width: 120 }}>
           <Text>Force Level (1–10)</Text>
-          <TextInput value={forceLevel} onChangeText={setForceLevel} style={styles.input} keyboardType="numeric" />
+          <TextInput
+            value={forceLevel}
+            onChangeText={(value) => setForceLevel(clampNumber(value, REALISTIC_LIMITS.forceLevel.min, REALISTIC_LIMITS.forceLevel.max))}
+            style={styles.input}
+            keyboardType="numeric"
+            maxLength={2}
+          />
         </View>
       </View>
 
@@ -379,7 +613,8 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
       <ThemedView style={[styles.chartCard, isNarrow ? styles.chartCardNarrow : {}, isAndroidTablet ? styles.chartCardTablet : {}]}>
         {sessions.length > 0 ? (
           (() => {
-            const recent = sessions.slice(-7);
+            const sortedSessions = sessions.slice().sort((a, b) => new Date((a as any).sessionDate).getTime() - new Date((b as any).sessionDate).getTime());
+            const recent = sortedSessions.slice(-7);
             const labels = recent.map((s) => new Date((s as any).sessionDate).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' }));
             const actuals = recent.map((s) => Number((s as any).actualMaxFlexion) || 0);
             const target = recent.map(() => Number(targetFlexion) || 0);
@@ -413,61 +648,50 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
             const actualArea = buildAreaPath(actualPoints, paddingTop + innerHeight);
             const targetArea = buildAreaPath(targetPoints, paddingTop + innerHeight);
 
+            // Render a LineChart (react-native-chart-kit) using the same data shape as programs.tsx
+            const chartData = {
+              labels,
+              datasets: [
+                { data: actuals, color: () => ACTUAL_LINE_COLOR, strokeWidth: 2 },
+                { data: target, color: () => TARGET_LINE_COLOR, strokeWidth: 2 },
+              ],
+              
+            };
+
+            const cfg = makeChartConfig(DSColors.text.secondary, DSColors.borderLight);
+            const usableWidth = Math.max(260, Math.min(chartWidth, width - (isNarrow ? 24 : 160)));
+
+            const chartRenderHeight = Math.max(160, chartHeight);
+
             return (
               <View style={{ width: '100%', alignItems: 'center' }}>
-                <Svg width={chartWidth} height={chartHeight}>
-                  <Defs>
-                    <LinearGradient id="actualFill" x1="0" y1="0" x2="0" y2="1">
-                      <Stop offset="0%" stopColor={DSColors.primary} stopOpacity="0.18" />
-                      <Stop offset="100%" stopColor={DSColors.primary} stopOpacity="0.02" />
-                    </LinearGradient>
-                    <LinearGradient id="targetFill" x1="0" y1="0" x2="0" y2="1">
-                      <Stop offset="0%" stopColor="#7DD3FC" stopOpacity="0.16" />
-                      <Stop offset="100%" stopColor="#7DD3FC" stopOpacity="0.02" />
-                    </LinearGradient>
-                  </Defs>
-
-                  {[0, 0.25, 0.5, 0.75, 1].map((step) => {
-                    const y = paddingTop + innerHeight * step;
-                    const value = Math.round(dataMax - range * step);
-                    return (
-                      <React.Fragment key={String(step)}>
-                        <Line x1={paddingLeft} y1={y} x2={chartWidth - paddingRight} y2={y} stroke={DSColors.borderLight} strokeWidth="1" opacity="0.8" />
-                        <SvgText x={paddingLeft - 8} y={y + 4} fontSize="10" fill={DSColors.text.secondary} textAnchor="end">
-                          {formatChartValue(value)}°
-                        </SvgText>
-                      </React.Fragment>
-                    );
-                  })}
-
-                  <Path d={actualArea} fill="url(#actualFill)" />
-                  <Path d={targetArea} fill="url(#targetFill)" />
-                  {targetPath ? <Path d={targetPath} stroke="#7DD3FC" strokeWidth="2.5" fill="none" strokeDasharray="6 4" /> : null}
-                  {actualPath ? <Path d={actualPath} stroke={DSColors.primary} strokeWidth="3" fill="none" /> : null}
-
-                  {actualPoints.map((point, index) => (
-                    <Circle key={`actual-${index}`} cx={point.x} cy={point.y} r="4" fill={DSColors.primary} />
-                  ))}
-                  {targetPoints.map((point, index) => (
-                    <Circle key={`target-${index}`} cx={point.x} cy={point.y} r="3.5" fill="#7DD3FC" />
-                  ))}
-
-                  {labels.map((label, index) => {
-                    const x = mapPoint(0, index, labels.length).x;
-                    return (
-                      <SvgText
-                        key={`${label}-${index}`}
-                        x={x}
-                        y={chartHeight - 10}
-                        fontSize="10"
-                        fill={DSColors.text.secondary}
-                        textAnchor="middle"
-                      >
-                        {label}
-                      </SvgText>
-                    );
-                  })}
-                </Svg>
+                <View style={{ width: usableWidth }}>
+                  <LineChart
+                    data={chartData as any}
+                    width={usableWidth}
+                    height={chartRenderHeight}
+                    chartConfig={cfg}
+                    bezier
+                    withDots
+                    withShadow
+                    withInnerLines
+                    withOuterLines={false}
+                    style={{ borderRadius: 12, overflow: 'hidden' }}
+                    formatYLabel={(v) => `${Math.round(Number(v))}°`}
+                    fromZero={false}
+                    yLabelsOffset={8}
+                  />
+                  <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 16, marginTop: 8 }}>
+                    <View style={styles.androidTabletLegendItem}>
+                      <View style={[styles.androidTabletLegendDot, { backgroundColor: ACTUAL_LINE_COLOR }]} />
+                      <Text style={styles.androidTabletLegendText}>Actual Flexion</Text>
+                    </View>
+                    <View style={styles.androidTabletLegendItem}>
+                      <View style={[styles.androidTabletLegendDot, { backgroundColor: TARGET_LINE_COLOR }]} />
+                      <Text style={styles.androidTabletLegendText}>Target Flexion</Text>
+                    </View>
+                  </View>
+                </View>
               </View>
             );
           })()
@@ -481,7 +705,7 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
         <ThemedText type="default" style={styles.empty}>ยังไม่มีประวัติการบำบัด</ThemedText>
       ) : (
         <View>
-          {sessions.map((item) => (
+          {sessions.slice().sort((a, b) => new Date((b as any).sessionDate).getTime() - new Date((a as any).sessionDate).getTime()).map((item) => (
             <ThemedView key={String((item as any).id)} style={styles.sessionRow}>
               <Text style={styles.sessionDate}>{new Date((item as any).sessionDate).toLocaleString()}</Text>
               <Text style={styles.sessionText}>Actual Max Flexion: {(item as any).actualMaxFlexion}</Text>
@@ -526,7 +750,7 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: DSLayout.screenPadding,
+      padding: 20,
     backgroundColor: DSColors.background,
   },
   heading: {
@@ -578,7 +802,7 @@ const styles = StyleSheet.create({
     color: DSColors.text.primary,
   },
   chartCard: {
-    height: 160,
+    minHeight: 220,
     backgroundColor: DSColors.surface,
     borderRadius: DSShape.radiusCard,
     borderWidth: 1,
@@ -586,6 +810,8 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     ...DSShadowSoft,
   },
   chartCardTablet: {
@@ -597,7 +823,7 @@ const styles = StyleSheet.create({
     borderColor: DSColors.border,
   },
   chartCardNarrow: {
-    height: 180,
+    minHeight: 240,
   },
   androidTabletProgressWrap: {
     width: '100%',
@@ -714,6 +940,11 @@ const styles = StyleSheet.create({
     backgroundColor: DSColors.primary,
     borderColor: DSColors.primary,
   },
+  weekdayChipDisabled: {
+    backgroundColor: DSColors.surface,
+    borderColor: DSColors.border,
+    opacity: 0.45,
+  },
   datePickerOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.4)',
@@ -802,6 +1033,8 @@ const styles = StyleSheet.create({
   },
   bodyContainer: {
     width: '100%',
+      maxWidth: 980,
+      alignSelf: 'center',
   },
   embeddedScrollContainer: {
     justifyContent: 'flex-start',
