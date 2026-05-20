@@ -156,7 +156,7 @@ export function DoctorOverviewDashboard() {
       const displayPatients: Patient[] = response.data.patients.map((p) => ({
         ...p,
         program: 'เข่าขวา',
-        status: 'รอดำเนินการ',
+        status: '',
         lastSession: undefined,
       }));
 
@@ -667,15 +667,15 @@ function PatientRow({ item }: { item: Patient }) {
         <Text style={styles.rowProgram}>{item.program}</Text>
         {!!item.lastSession && <Text style={styles.rowLast}>{item.lastSession}</Text>}
       </View>
-      <View style={[styles.statusChip, { backgroundColor: `${statusColor}18` }]}>
+      {/* <View style={[styles.statusChip, { backgroundColor: `${statusColor}18` }]}>
         <Text style={[styles.statusText, { color: statusColor }]}>{item.status}</Text>
-      </View>
+      </View> */}
 
       {/* Action icons: Edit and Delete */}
       <View style={styles.rowActions}>
         <Pressable
           onPress={openEditModal}
-          style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
+          style={({ pressed }) => [styles.iconButton, styles.EditIcon, pressed && styles.pressed]}
           hitSlop={8}
           accessibilityLabel="Edit patient"
         >
@@ -779,7 +779,7 @@ function PatientRow({ item }: { item: Patient }) {
                       onPress={() => setEditModalVisible(false)}
                       style={({ pressed }) => [styles.outlineButton, pressed && styles.pressed]}
                     >
-                      <Text style={styles.outlineButtonText}>ยกเลิก</Text>
+                      <Text style={styles.startSessionCtaText}>ยกเลิก</Text>
                     </Pressable>
 
                     <Pressable
@@ -787,7 +787,7 @@ function PatientRow({ item }: { item: Patient }) {
                       style={({ pressed }) => [styles.primaryButton, pressed && styles.primaryPressed]}
                       disabled={busy}
                     >
-                      <Text style={styles.primaryButtonText}>{busy ? 'กำลังบันทึก...' : 'บันทึก'}</Text>
+                      <Text style={styles.startSessionCtaText}>{busy ? 'กำลังบันทึก...' : 'บันทึก'}</Text>
                     </Pressable>
                   </View>
                 </View>
@@ -1135,10 +1135,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   primaryButton: {
-    flex: 1,
     backgroundColor: DSColors.primary,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
     borderRadius: DSShape.radiusButton,
     alignItems: 'center',
   },
@@ -1217,7 +1214,7 @@ const styles = StyleSheet.create({
   rowActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginLeft: 8,
+    marginLeft: 12,
   },
   iconButton: {
     width: 36,
@@ -1225,9 +1222,17 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    marginLeft: 8,
     backgroundColor: DSColors.surface,
     borderWidth: 1,
     borderColor: DSColors.border,
+  },
+  EditIcon: {
+    marginRight: 12,
+  },
+  startSessionCtaText: {
+    ...DSTypography.bodyBold,
+    color: DSColors.text.primary,
+    textAlign: 'center',
+    fontSize: 14,
   },
 });

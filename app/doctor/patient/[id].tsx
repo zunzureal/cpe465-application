@@ -467,7 +467,7 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
   const body = (
     <View style={[styles.container, effectiveEmbedded && styles.embeddedContainer, styles.bodyContainer]}>
       <View style={styles.headerRow}>
-        <ThemedText type="title" style={styles.heading}>{'จัดการแผนผู้ป่วย #'}{patientId}</ThemedText>
+        <ThemedText type="title" style={styles.heading}>{'จัดการแผนผู้ป่วย'}</ThemedText>
         {onClose && (
           <Pressable onPress={onClose} style={styles.closeButton}>
             <Text style={styles.closeButtonText}>ปิด</Text>
@@ -739,7 +739,7 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
               { opacity: isSaving ? 0.6 : pressed ? 0.85 : 1 },
             ]}
           >
-            <Text style={styles.primaryButtonText}>{isSaving ? 'กำลังบันทึก...' : 'Save & Send to Machine'}</Text>
+            <Text style={styles.startSessionCtaText}>{isSaving ? 'กำลังบันทึก...' : 'Save & Send to Machine'}</Text>
           </Pressable>
         </View>
       </View>
@@ -777,9 +777,9 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   meta: {
-    ...DSTypography.body,
+    ...DSTypography.captionBold,
     marginBottom: 8,
-    color: DSColors.text.secondary,
+    color: DSColors.text.primary,
   },
   label: {
     ...DSTypography.caption,
@@ -787,8 +787,8 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   sectionLabel: {
-    ...DSTypography.caption,
-    color: DSColors.text.secondary,
+    ...DSTypography.captionBold,
+    color: DSColors.text.primary,
     marginBottom: 8,
     marginTop: 4,
   },
@@ -1054,5 +1054,17 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 520,
     alignSelf: 'center',
+  },
+  startSessionCtaText: {
+    ...DSTypography.bodyBold,
+    backgroundColor: DSColors.primary,
+    borderRadius: DSShape.radiusButton,
+    color: '#FFFFFF',
+    textAlign: 'center',
+    paddingHorizontal: 12,
+    paddingTop: 6,
+    paddingBottom: 10,
+    gap: 10,
+    fontSize: 14,
   },
 });
