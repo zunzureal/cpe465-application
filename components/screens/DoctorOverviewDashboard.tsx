@@ -185,12 +185,22 @@ export function DoctorOverviewDashboard() {
         alert('กรุณากรอกชื่อและนามสกุล');
         return;
       }
+      // Ensure name contains only Thai letters and spaces
+      const thaiOnly = /^[\u0E00-\u0E7F\s]+$/;
+      if (!thaiOnly.test(fullName)) {
+        alert('ชื่อและนามสกุลต้องเป็นตัวอักษรภาษาไทยเท่านั้น');
+        return;
+      }
       if (!hospitalNumber) {
         alert('กรุณากรอก Hospital Number (HN)');
         return;
       }
-      if (!newAge.trim() || Number.isNaN(parsedAge)) {
-        alert('กรุณากรอกอายุเป็นตัวเลข');
+      if (!newPhone.trim() || newPhone.trim().length !== 10) {
+        alert('กรุณากรอกเบอร์โทรศัพท์ให้ครบ 10 หลัก');
+        return;
+      }
+      if (!newAge.trim() || Number.isNaN(parsedAge) || Number(parsedAge) < 0) {
+        alert('กรุณากรอกอายุเป็นตัวเลขบวก');
         return;
       }
 
@@ -312,11 +322,30 @@ export function DoctorOverviewDashboard() {
                 <View style={styles.rowSplit}>
                   <View style={{ flex: 1, marginRight: 8 }}>
                     <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>ชื่อ (First Name)</ThemedText>
-                    <TextInput placeholder="ชื่อจริง" placeholderTextColor={DSColors.text.secondary} value={newName} onChangeText={setNewName} style={styles.input} />
+                    <TextInput
+                      placeholder="ชื่อจริง"
+                      placeholderTextColor={DSColors.text.secondary}
+                      value={newName}
+                      onChangeText={(text) => {
+                        // Allow only Thai characters and spaces while typing
+                        const sanitized = text.replace(/[^\u0E00-\u0E7F\s]/g, '');
+                        setNewName(sanitized);
+                      }}
+                      style={styles.input}
+                    />
                   </View>
                   <View style={{ flex: 1 }}>
                     <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>นามสกุล (Last Name)</ThemedText>
-                    <TextInput placeholder="นามสกุล" placeholderTextColor={DSColors.text.secondary} value={newLastName} onChangeText={setNewLastName} style={styles.input} />
+                    <TextInput
+                      placeholder="นามสกุล"
+                      placeholderTextColor={DSColors.text.secondary}
+                      value={newLastName}
+                      onChangeText={(text) => {
+                        const sanitized = text.replace(/[^\u0E00-\u0E7F\s]/g, '');
+                        setNewLastName(sanitized);
+                      }}
+                      style={styles.input}
+                    />
                   </View>
                 </View>
 
@@ -324,13 +353,36 @@ export function DoctorOverviewDashboard() {
                 <TextInput placeholder="เช่น HN123456" placeholderTextColor={DSColors.text.secondary} value={newHn} onChangeText={setNewHn} style={styles.input} />
 
                 <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>เบอร์โทรศัพท์ (Phone Number) *</ThemedText>
-                <TextInput placeholder="08XXXXXXXX" placeholderTextColor={DSColors.text.secondary} value={newPhone} onChangeText={setNewPhone} style={styles.input} keyboardType="phone-pad" />
+                <TextInput
+                  placeholder="08XXXXXXXX"
+                  placeholderTextColor={DSColors.text.secondary}
+                  value={newPhone}
+                  onChangeText={(text) => {
+                    // Allow only digits and limit to 10 characters
+                    const digits = text.replace(/\D/g, '').slice(0, 10);
+                    setNewPhone(digits);
+                  }}
+                  maxLength={10}
+                  style={styles.input}
+                  keyboardType="phone-pad"
+                />
                 <ThemedText type="default" style={{ fontSize: 12, marginLeft: 4,marginBottom: 10, color: DSColors.text.secondary }}>ใช้สำหรับให้ผู้ป่วยเข้าสู่ระบบแอปพลิเคชัน (Used for patient app login)</ThemedText>
 
                 <View style={styles.rowSplit}>
                   <View style={{ flex: 1, marginRight: 8 }}>
                     <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>อายุ (Age)</ThemedText>
-                    <TextInput placeholder="เช่น 45" placeholderTextColor={DSColors.text.secondary} value={newAge} onChangeText={setNewAge} keyboardType="numeric" style={styles.input} />
+                    <TextInput
+                      placeholder="เช่น 45"
+                      placeholderTextColor={DSColors.text.secondary}
+                      value={newAge}
+                      onChangeText={(text) => {
+                        // Allow only digits and prevent negative values
+                        const digits = text.replace(/\D/g, '');
+                        setNewAge(digits);
+                      }}
+                      keyboardType="numeric"
+                      style={styles.input}
+                    />
                   </View>
                   <View style={{ flex: 1 }}>
                     <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>เพศ (Gender)</ThemedText>
@@ -340,17 +392,17 @@ export function DoctorOverviewDashboard() {
                   </View>
                 </View>
 
-                <View style={{ height: 12 }} />
-                <ThemedText type="title" style={{ fontSize: 22, marginBottom: 12, color: DSColors.text.primary }}>ข้อมูลการรักษาและอุปกรณ์ (Treatment & Device)</ThemedText>
-                <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>บริเวณที่ผ่าตัด (Surgery Type / Location)</ThemedText>
+                {/* <View style={{ height: 12 }} />
+                <ThemedText type="title" style={{ fontSize: 22, marginBottom: 12, color: DSColors.text.primary }}>ข้อมูลการรักษาและอุปกรณ์ (Treatment & Device)</ThemedText> */}
+                {/* <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>บริเวณที่ผ่าตัด (Surgery Type / Location)</ThemedText>
                 <Pressable style={styles.selectBox} onPress={() => openPicker('surgery')}>
                   <Text style={{ color: newSurgeryLocation ? DSColors.text.primary : DSColors.text.secondary }}>{newSurgeryLocation || '— เลือกบริเวณ —'}</Text>
-                </Pressable>
+                </Pressable> */}
 
-                  <ThemedText type="subtitle" style={{ fontSize: 16, marginTop: 10, marginBottom: 6, color: DSColors.text.primary }}>เลือกเครื่องกายภาพ (Assign Machine)</ThemedText>
+                  {/* <ThemedText type="subtitle" style={{ fontSize: 16, marginTop: 10, marginBottom: 6, color: DSColors.text.primary }}>เลือกเครื่องกายภาพ (Assign Machine)</ThemedText>
                   <Pressable style={styles.selectBox} onPress={() => openPicker('machine')}>
                     <Text style={{ color: newMachine ? DSColors.text.primary : DSColors.text.secondary }}>{newMachine || '— เลือกเครื่อง —'}</Text>
-                  </Pressable>
+                  </Pressable> */}
                 </ScrollView>
 
                 <View style={styles.addModalActionsFooter}>
@@ -437,7 +489,7 @@ export function DoctorOverviewDashboard() {
                 keyExtractor={(item) => String(item.id)}
                 ListEmptyComponent={
                   <View style={styles.empty}>
-                    <Text style={styles.emptyText}>ไม่พบผู้ป่วยที่ตรงกับคำค้น</Text>
+                    <Text style={styles.emptyText}>ไม่พบผู้ป่วยที่ตรงกับคำค้นหา</Text>
                   </View>
                 }
                 renderItem={({ item }) => (
@@ -466,7 +518,7 @@ export function DoctorOverviewDashboard() {
                   keyExtractor={(item) => String(item.id)}
                   ListEmptyComponent={
                     <View style={styles.empty}>
-                      <Text style={styles.emptyText}>ไม่พบผู้ป่วยที่ตรงกับคำค้น</Text>
+                      <Text style={styles.emptyText}>ไม่พบผู้ป่วยที่ตรงกับคำค้นหา</Text>
                     </View>
                   }
                   renderItem={({ item }) => (
