@@ -303,6 +303,18 @@ export async function startSession(
 }
 
 /**
+ * Delete the treatment plan for a patient (doctor only)
+ */
+export async function deletePatientPreset(
+  authToken: string,
+  patientId: number
+): Promise<ApiResponse<void>> {
+  return apiCall<void>(`/api/patients/${patientId}/preset`, {
+    method: 'DELETE',
+  }, authToken);
+}
+
+/**
  * Get all sessions for a patient
  */
 export async function getPatientSessions(

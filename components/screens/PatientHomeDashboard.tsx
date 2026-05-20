@@ -53,48 +53,18 @@ interface TodayPlan {
 }
 
 type PlanState = 'loading' | 'hasPlan' | 'noPlan';
-type SessionStatus = 'SUCCESS' | 'CONTINUE' | 'FAILED';
+type SessionStatus = 'SUCCESS';
 
 // ─── Calendar widget ──────────────────────────────────────────────────────────
 
-/** Maps date string (YYYY-MM-DD) → sessions completed that day (1 – 3). Only include days with actual activity. */
-const MOCK_SESSION_COUNTS: Record<string, number> = {
-  '2026-04-01': 3, '2026-04-03': 2, '2026-04-05': 1,
-  '2026-04-07': 3, '2026-04-08': 3, '2026-04-09': 2,
-  '2026-04-10': 3, '2026-04-11': 1, '2026-04-12': 3,
-  '2026-04-14': 2, '2026-04-15': 3, '2026-04-17': 1,
-  '2026-04-19': 3, '2026-04-21': 3, '2026-04-22': 2,
-  '2026-04-24': 3, '2026-04-26': 3, '2026-04-28': 2,
-  '2026-05-01': 3, '2026-05-02': 1, '2026-05-03': 2,
-  '2026-05-05': 1,
-};
-
-/** Set of YYYY-MM-DD strings that are doctor-prescribed rest days. */
-const MOCK_REST_DAYS = new Set([
-  '2026-04-02', '2026-04-04', '2026-04-06',
-  '2026-04-13', '2026-04-16', '2026-04-20',
-  '2026-04-25', '2026-04-27',
-  '2026-05-04', '2026-05-09', '2026-05-10',
-]);
-
 const SESSIONS_PER_DAY = 3;
 
-// ─── Weekly plan mock ─────────────────────────────────────────────────────────
-/** Maps YYYY-MM-DD → { scheduled: bool, sessionsCompleted: number } */
+// ─── Weekly plan ──────────────────────────────────────────────────────────────
 interface DayPlan {
   scheduled: boolean;
   sessionsCompleted: number;
   sessionStatuses: SessionStatus[];
 }
-const MOCK_WEEKLY_PLAN: Record<string, DayPlan> = {
-  '2026-05-04': { scheduled: true,  sessionsCompleted: 3, sessionStatuses: ['SUCCESS', 'SUCCESS', 'SUCCESS'] },
-  '2026-05-05': { scheduled: true,  sessionsCompleted: 2, sessionStatuses: ['SUCCESS', 'CONTINUE'] },
-  '2026-05-06': { scheduled: true,  sessionsCompleted: 1, sessionStatuses: ['FAILED'] },
-  '2026-05-07': { scheduled: true,  sessionsCompleted: 0, sessionStatuses: [] },
-  '2026-05-08': { scheduled: true,  sessionsCompleted: 0, sessionStatuses: [] },
-  '2026-05-09': { scheduled: false, sessionsCompleted: 0, sessionStatuses: [] },
-  '2026-05-10': { scheduled: false, sessionsCompleted: 0, sessionStatuses: [] },
-};
 
 const THAI_MONTHS = [
   'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน',
@@ -117,17 +87,11 @@ function buildSessionCountsByDate(sessions: SessionResponse[]): Record<string, n
 
 function buildSessionStatusesByDate(sessions: SessionResponse[]): Record<string, SessionStatus[]> {
   return sessions.reduce<Record<string, SessionStatus[]>>((acc, session) => {
-    const key = toDateKey(new Date(session.sessionDate));
-    const status =
-      session.sessionStatus === 'SUCCESS' || session.sessionStatus === 'CONTINUE' || session.sessionStatus === 'FAILED'
-        ? session.sessionStatus
-        : session.plan?.status === 'CANCELLED'
-          ? 'FAILED'
-          : session.actualMaxFlexion >= (session.plan?.targetFlexion ?? 0)
-            ? 'SUCCESS'
-            : 'CONTINUE';
-    if (!acc[key]) acc[key] = [];
-    acc[key].push(status);
+    if (session.sessionStatus === 'SUCCESS') {
+      const key = toDateKey(new Date(session.sessionDate));
+      if (!acc[key]) acc[key] = [];
+      acc[key].push('SUCCESS');
+    }
     return acc;
   }, {});
 }
@@ -165,10 +129,9 @@ function buildWeeklyPlanFromCounts(
 
 interface CalendarWidgetProps {
   sessionStatusesByDate: Record<string, SessionStatus[]>;
-  restDays: Set<string>;
 }
 
-function CalendarWidget({ sessionStatusesByDate, restDays }: CalendarWidgetProps) {
+function CalendarWidget({ sessionStatusesByDate }: CalendarWidgetProps) {
   const today = new Date();
   const [display, setDisplay] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
 
@@ -184,8 +147,6 @@ function CalendarWidget({ sessionStatusesByDate, restDays }: CalendarWidgetProps
   const isToday = (d: number) =>
     today.getFullYear() === year && today.getMonth() === month && today.getDate() === d;
   const isFuture = (d: number) => new Date(year, month, d) > today;
-  const isRest = (d: number) => restDays.has(dateKey(d));
-
   // Summary counts for the month header
   const daysWithSessions = Array.from({ length: daysInMonth }, (_, i) => i + 1)
     .filter(d => getStatuses(d).length > 0).length;
@@ -212,7 +173,6 @@ function CalendarWidget({ sessionStatusesByDate, restDays }: CalendarWidgetProps
     const statuses = getStatuses(d);
     const todayFlag = isToday(d);
     const future = isFuture(d);
-    const restDay = !future && !todayFlag && isRest(d);
 
     const numColor = todayFlag
       ? '#FFFFFF'
@@ -221,7 +181,7 @@ function CalendarWidget({ sessionStatusesByDate, restDays }: CalendarWidgetProps
       : DSColors.secondary;
 
     return (
-      <View key={d} style={[calStyles.cell, todayFlag && calStyles.cellToday, restDay && calStyles.cellRest]}>
+      <View key={d} style={[calStyles.cell, todayFlag && calStyles.cellToday]}>
         {/* Day number — today gets a red filled circle */}
         <View style={[calStyles.dayNumWrap, todayFlag && calStyles.dayNumWrapToday]}>
           <Text style={[
@@ -233,11 +193,9 @@ function CalendarWidget({ sessionStatusesByDate, restDays }: CalendarWidgetProps
           </Text>
         </View>
 
-        {/* Status: rest / dots / placeholder */}
+        {/* Status: dots / placeholder */}
         {future ? (
           <View style={calStyles.dotsRowPlaceholder} />
-        ) : restDay ? (
-          <Text style={calStyles.restLabel}>หยุด</Text>
         ) : (
           <View style={calStyles.dotsRow}>
             {Array.from({ length: SESSIONS_PER_DAY }, (_, i) => (
@@ -245,13 +203,7 @@ function CalendarWidget({ sessionStatusesByDate, restDays }: CalendarWidgetProps
                 key={i}
                 style={[
                   calStyles.dot,
-                  statuses[i] === 'SUCCESS'
-                    ? calStyles.dotDone
-                    : statuses[i] === 'FAILED'
-                      ? calStyles.dotFailed
-                      : statuses[i] === 'CONTINUE'
-                        ? calStyles.dotProgress
-                        : calStyles.dotEmpty,
+                  statuses[i] === 'SUCCESS' ? calStyles.dotDone : calStyles.dotEmpty,
                 ]}
               />
             ))}
@@ -314,14 +266,11 @@ function CalendarWidget({ sessionStatusesByDate, restDays }: CalendarWidgetProps
           <Text style={calStyles.legendText}>ไม่ทำ</Text>
         </View>
         <View style={calStyles.legendItem}>
-          <Text style={[calStyles.restLabel, { fontSize: 10 }]}>หยุด</Text>
-          <Text style={calStyles.legendText}>วันหยุด</Text>
-        </View>
-        <View style={calStyles.legendItem}>
           <View style={[calStyles.dayNumWrap, calStyles.dayNumWrapToday, { width: 18, height: 18, borderRadius: 9 }]} />
           <Text style={calStyles.legendText}>วันนี้</Text>
         </View>
       </View>
+
     </View>
   );
 }
@@ -351,10 +300,9 @@ function WeeklyPlanStrip({
     d.setDate(monday.getDate() + i);
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     const isToday = key === todayKey;
-    const isPast = d < today && !isToday;
     const isFuture = d > today;
-    const plan = weekPlan[key] ?? { scheduled: false, sessionsCompleted: 0 };
-    return { d, key, isToday, isPast, isFuture, plan, dayName: WEEK_DAY_SHORT[d.getDay()] };
+    const plan = weekPlan[key] ?? { scheduled: false, sessionsCompleted: 0, sessionStatuses: [] };
+    return { d, key, isToday, isFuture, plan, dayName: WEEK_DAY_SHORT[d.getDay()] };
   });
 
   return (
@@ -364,15 +312,13 @@ function WeeklyPlanStrip({
         <Text style={weekStyles.title}>แผนสัปดาห์นี้</Text>
       </View>
       <View style={weekStyles.strip}>
-        {days.map(({ d, key, isToday, isPast, isFuture, plan, dayName }) => {
-          const noActivity = !plan.scheduled && plan.sessionsCompleted === 0;
+        {days.map(({ d, key, isToday, isFuture, plan, dayName }) => {
           return (
             <View
               key={key}
               style={[
                 weekStyles.dayCell,
                 isToday && weekStyles.dayCellToday,
-                noActivity && weekStyles.dayCellInactive,
               ]}
             >
               {/* Day name */}
@@ -388,9 +334,7 @@ function WeeklyPlanStrip({
               </View>
 
               {/* Status indicator */}
-              {noActivity ? (
-                <Text style={weekStyles.restLabel}>หยุด</Text>
-              ) : isFuture && plan.scheduled ? (
+              {isFuture && plan.scheduled ? (
                 <View style={weekStyles.plannedPips}>
                   {Array.from({ length: sessionsPerDay }, (_, i) => (
                     <View key={i} style={[weekStyles.pip, weekStyles.pipPlanned]} />
@@ -405,13 +349,7 @@ function WeeklyPlanStrip({
                         key={i}
                         style={[
                           weekStyles.pip,
-                          status === 'SUCCESS'
-                            ? weekStyles.pipDone
-                            : status === 'FAILED'
-                              ? weekStyles.pipFailed
-                              : status === 'CONTINUE'
-                                ? weekStyles.pipProgress
-                                : weekStyles.pipEmpty,
+                          status === 'SUCCESS' ? weekStyles.pipDone : weekStyles.pipEmpty,
                         ]}
                       />
                     );
@@ -420,7 +358,7 @@ function WeeklyPlanStrip({
               )}
 
               {/* Status label */}
-              {isToday && !noActivity && (
+              {isToday && (
                 <Text style={weekStyles.todayLabel}>วันนี้</Text>
               )}
             </View>
@@ -435,14 +373,6 @@ function WeeklyPlanStrip({
           <Text style={weekStyles.legendText}>ทำแล้ว</Text>
         </View>
         <View style={weekStyles.legendItem}>
-          <View style={[weekStyles.pip, weekStyles.pipProgress]} />
-          <Text style={weekStyles.legendText}>กำลังดำเนินการ</Text>
-        </View>
-        <View style={weekStyles.legendItem}>
-          <View style={[weekStyles.pip, weekStyles.pipFailed]} />
-          <Text style={weekStyles.legendText}>ล้มเหลว</Text>
-        </View>
-        <View style={weekStyles.legendItem}>
           <View style={[weekStyles.pip, weekStyles.pipPlanned]} />
           <Text style={weekStyles.legendText}>มีแผน</Text>
         </View>
@@ -451,6 +381,7 @@ function WeeklyPlanStrip({
           <Text style={weekStyles.legendText}>ยังไม่ทำ</Text>
         </View>
       </View>
+
     </View>
   );
 }
@@ -602,12 +533,7 @@ export function PatientHomeDashboard() {
 
     // Scenario A — has plan
     const plan = todayPlan!;
-    const todayKey = toDateKey(new Date());
-    const todayStatuses = sessionStatusesByDate[todayKey] ?? [];
-    const hasInProgressSessionToday = todayStatuses.includes('CONTINUE');
-    const nextSession = hasInProgressSessionToday
-      ? Math.max(1, plan.sessionsCompletedToday)
-      : plan.sessionsCompletedToday + 1;
+    const nextSession = plan.sessionsCompletedToday + 1;
     const allDone = plan.sessionsCompletedToday >= plan.sessionsPerDay;
 
     return (
@@ -702,7 +628,7 @@ export function PatientHomeDashboard() {
           ) : (
             <>
               <Text style={styles.startSessionCtaText}>
-                {hasInProgressSessionToday ? `ทำต่อครั้งที่ ${nextSession}` : `เริ่มครั้งที่ ${nextSession}`}
+                เริ่มครั้งที่ {nextSession}
               </Text>
               <Ionicons name="chevron-forward" size={22} color="#FFFFFF" />
             </>
@@ -734,7 +660,7 @@ export function PatientHomeDashboard() {
         <View style={[styles.card, DSShadow]}>
           <Text style={styles.cardTitle}>ความคืบหน้าการทำกายภาพ</Text>
           <Text style={styles.cardSubtitle}>ปฏิทินแสดงวันที่ทำกายภาพเรียบร้อยแล้ว</Text>
-          <CalendarWidget sessionStatusesByDate={sessionStatusesByDate} restDays={new Set<string>()} />
+          <CalendarWidget sessionStatusesByDate={sessionStatusesByDate} />
         </View>
 
         <View style={styles.bottomSpacer} />
@@ -817,12 +743,6 @@ const calStyles = StyleSheet.create({
     borderColor: DSColors.primary,
     backgroundColor: DSColors.primaryLight,
   },
-  cellRest: {},
-  restLabel: {
-    fontSize: 9,
-    fontWeight: '500',
-    color: DSColors.text.secondary,
-  },
   dayNumWrap: {
     width: 26,
     height: 26,
@@ -857,12 +777,6 @@ const calStyles = StyleSheet.create({
   },
   dotDone: {
     backgroundColor: DSColors.success,
-  },
-  dotProgress: {
-    backgroundColor: DSColors.warning,
-  },
-  dotFailed: {
-    backgroundColor: DSColors.danger,
   },
   dotEmpty: {
     backgroundColor: '#E5E7EB',
@@ -976,7 +890,6 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: DSColors.primaryLight,
   },
-  startSessionCardPressed: { opacity: 0.95 },
   startSessionCardDone: {
     borderColor: DSColors.success + '40',
     backgroundColor: DSColors.surface,
@@ -1016,46 +929,8 @@ const styles = StyleSheet.create({
     color: DSColors.primary,
     textAlign: 'center',
   },
-  startSessionSubtitle: {
-    ...DSTypography.caption,
-    color: DSColors.text.secondary,
-    textAlign: 'center',
-  },
   textMuted: {
     color: DSColors.text.secondary,
-  },
-
-  // ── Session progress dots (green only, gray for pending, no red) ──────────
-  sessionProgressRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    marginTop: 10,
-  },
-  sessionProgressDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-  },
-  sessionProgressDotDone: {
-    backgroundColor: DSColors.success,
-  },
-  sessionProgressDotNext: {
-    backgroundColor: DSColors.border,
-    borderWidth: 1,
-    borderColor: DSColors.text.secondary,
-  },
-  sessionProgressDotEmpty: {
-    backgroundColor: DSColors.borderLight,
-    borderWidth: 1,
-    borderColor: DSColors.border,
-  },
-  sessionProgressLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: DSColors.text.secondary,
-    marginLeft: 4,
   },
 
   // ── Session pips inside GoalChip icon wrap ────────────────────────────────
@@ -1202,7 +1077,6 @@ const weekStyles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: DSColors.primary,
   },
-  dayCellInactive: {},
   dayName: {
     fontSize: 11,
     fontWeight: '600',
@@ -1243,12 +1117,6 @@ const weekStyles = StyleSheet.create({
   pipDone: {
     backgroundColor: DSColors.success,
   },
-  pipProgress: {
-    backgroundColor: DSColors.warning,
-  },
-  pipFailed: {
-    backgroundColor: DSColors.danger,
-  },
   pipEmpty: {
     backgroundColor: DSColors.border,
   },
@@ -1256,11 +1124,6 @@ const weekStyles = StyleSheet.create({
     backgroundColor: DSColors.primary + '50',
     borderWidth: 1,
     borderColor: DSColors.primary,
-  },
-  restLabel: {
-    fontSize: 9,
-    color: DSColors.text.secondary,
-    fontWeight: '500',
   },
   todayLabel: {
     fontSize: 9,

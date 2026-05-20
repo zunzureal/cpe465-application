@@ -75,38 +75,22 @@ interface SessionRecord {
   painLevel: 1 | 2 | 3;
   isManual: boolean;
   dayLabel: string;
-  sessionStatus?: 'SUCCESS' | 'CONTINUE' | 'FAILED';
+  sessionStatus?: 'SUCCESS';
 }
 
-function resolveSessionStatus(apiSession: any): 'SUCCESS' | 'CONTINUE' | 'FAILED' {
-  const storedStatus = String(apiSession.sessionStatus ?? apiSession.status ?? '').toUpperCase();
-  if (storedStatus === 'SUCCESS' || storedStatus === 'CONTINUE' || storedStatus === 'FAILED') {
-    return storedStatus;
-  }
-
-  if (String(apiSession.plan?.status ?? '').toUpperCase() === 'CANCELLED') {
-    return 'FAILED';
-  }
-
-  return Number(apiSession.actualMaxFlexion ?? 0) >= Number(apiSession.plan?.targetFlexion ?? 0)
-    ? 'SUCCESS'
-    : 'CONTINUE';
+function resolveSessionStatus(apiSession: any): 'SUCCESS' | undefined {
+  const stored = String(apiSession.sessionStatus ?? apiSession.status ?? '').toUpperCase();
+  return stored === 'SUCCESS' ? 'SUCCESS' : undefined;
 }
 
 function resolveDisplaySessionStatus(
-  sessionStatus?: 'SUCCESS' | 'CONTINUE' | 'FAILED',
+  sessionStatus?: 'SUCCESS',
   achievedFlexion?: number,
   targetFlexion?: number,
-): 'SUCCESS' | 'CONTINUE' | 'FAILED' {
-  if (sessionStatus === 'SUCCESS' || sessionStatus === 'CONTINUE' || sessionStatus === 'FAILED') {
-    return sessionStatus;
-  }
-
-  if (achievedFlexion != null && targetFlexion != null) {
-    return achievedFlexion >= targetFlexion ? 'SUCCESS' : 'CONTINUE';
-  }
-
-  return 'CONTINUE';
+): 'SUCCESS' | 'INCOMPLETE' {
+  if (sessionStatus === 'SUCCESS') return 'SUCCESS';
+  if (achievedFlexion != null && targetFlexion != null && achievedFlexion >= targetFlexion) return 'SUCCESS';
+  return 'INCOMPLETE';
 }
 
 // Transform API SessionResponse to SessionRecord
@@ -229,10 +213,9 @@ const PAIN_CONFIG: Record<1 | 2 | 3, { emoji: string; label: string; color: stri
   3: { emoji: '😫', label: 'เจ็บมาก', color: DSColors.danger },
 };
 
-const SESSION_STATUS_CONFIG: Record<'SUCCESS' | 'CONTINUE' | 'FAILED', string> = {
+const SESSION_STATUS_CONFIG: Record<'SUCCESS' | 'INCOMPLETE', string> = {
   SUCCESS: DSColors.success,
-  CONTINUE: DSColors.warning,
-  FAILED: DSColors.danger,
+  INCOMPLETE: DSColors.text.secondary,
 };
 
 // ─── Chart config ─────────────────────────────────────────────────────────────
@@ -260,7 +243,7 @@ interface SessionCardProps {
   targetFlexion: number;
   painLevel: 1 | 2 | 3;
   isManual: boolean;
-  sessionStatus?: 'SUCCESS' | 'CONTINUE' | 'FAILED';
+  sessionStatus?: 'SUCCESS';
 }
 
 function SessionCard({ time, sessionNum, sessionsPerDay, achievedFlexion, targetFlexion, painLevel, isManual, sessionStatus }: SessionCardProps) {
@@ -288,7 +271,7 @@ function SessionCard({ time, sessionNum, sessionsPerDay, achievedFlexion, target
             color={isManual ? DSColors.warning : DSColors.success}
           />
           <Text style={[styles.badgeText, { color: statusColor }]}>
-            {resolvedStatus === 'SUCCESS' ? 'สำเร็จ' : resolvedStatus === 'FAILED' ? 'ล้มเหลว' : 'กำลังดำเนินการ'}
+            {resolvedStatus === 'SUCCESS' ? 'สำเร็จ' : 'ยังไม่สำเร็จ'}
           </Text>
         </View>
       </View>
@@ -519,9 +502,7 @@ export default function HistoryScreen() {
                     const dotStyle = sessionForIndex
                       ? dotStatus === 'SUCCESS'
                         ? styles.dayDotDone
-                        : dotStatus === 'FAILED'
-                          ? styles.dayDotFailed
-                          : styles.dayDotInProgress
+                        : styles.dayDotEmpty
                       : styles.dayDotEmpty;
 
                     return <View key={i} style={[styles.dayDot, dotStyle]} />;
@@ -730,12 +711,6 @@ const styles = StyleSheet.create({
   },
   dayDotDone: {
     backgroundColor: DSColors.success,
-  },
-  dayDotInProgress: {
-    backgroundColor: DSColors.warning,
-  },
-  dayDotFailed: {
-    backgroundColor: DSColors.danger,
   },
   dayDotEmpty: {
     backgroundColor: DSColors.borderLight,
