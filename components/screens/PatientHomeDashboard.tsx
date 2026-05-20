@@ -611,15 +611,12 @@ export function PatientHomeDashboard() {
     const allDone = plan.sessionsCompletedToday >= plan.sessionsPerDay;
 
     return (
-      <Pressable
-        disabled={allDone}
-        style={({ pressed }) => [
+      <View
+        style={[
           styles.startSessionCard,
           DSShadow,
           allDone && styles.startSessionCardDone,
-          !allDone && pressed && styles.startSessionCardPressed,
         ]}
-        onPress={() => startMockConnection(() => router.push('/therapy-session'))}
         accessibilityLabel={allDone ? 'ทำครบทุกเซสชันแล้ว' : 'เริ่มเซสชันกายภาพบำบัด'}
       >
         <View style={styles.startSessionHeader}>
@@ -685,8 +682,18 @@ export function PatientHomeDashboard() {
           </View>
         </View>
 
-        {/* CTA — green success state when done, primary when active */}
-        <View style={[styles.startSessionCta, allDone ? styles.startSessionCtaDone : styles.startSessionCtaActive]}>
+        {/* CTA Button — only button is pressable */}
+        <Pressable
+          disabled={allDone}
+          style={({ pressed }) => [
+            styles.startSessionCta,
+            allDone ? styles.startSessionCtaDone : styles.startSessionCtaActive,
+            !allDone && pressed && { opacity: 0.7 },
+          ]}
+          onPress={() => startMockConnection(() => router.push('/therapy-session'))}
+          accessibilityRole="button"
+          accessibilityLabel={allDone ? 'ทำครบทุกเซสชันแล้ว' : 'เริ่มเซสชันกายภาพบำบัด'}
+        >
           {allDone ? (
             <>
               <Ionicons name="checkmark-circle" size={22} color="#FFFFFF" />
@@ -700,8 +707,8 @@ export function PatientHomeDashboard() {
               <Ionicons name="chevron-forward" size={22} color="#FFFFFF" />
             </>
           )}
-        </View>
-      </Pressable>
+        </Pressable>
+      </View>
     );
   };
 
