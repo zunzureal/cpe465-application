@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { View, TextInput, Switch, StyleSheet, Pressable, Text, TouchableOpacity, useWindowDimensions, Modal, ScrollView, Platform } from 'react-native';
+import { View, TextInput, Switch, StyleSheet, Pressable, Text, TouchableOpacity, useWindowDimensions, Modal, ScrollView, Platform, Dimensions } from 'react-native';
+import { LineChart } from 'react-native-chart-kit';
 import Svg, { Circle, Defs, LinearGradient, Line, Path, Stop, Text as SvgText } from 'react-native-svg';
 import { useLocalSearchParams } from 'expo-router';
 import { DSColors, DSLayout, DSShape, DSShadowSoft, DSTypography } from '@/constants/design-system';
 import { useAuth } from '@/contexts/AuthContext';
-import { putPatientPreset, getDoctorPatient, getPatientPreset, getPatientSessions } from '@/services/apiClient';
+import { putPatientPreset, getDoctorPatient, getPatientPreset, getPatientSessions, deleteTreatmentPlan } from '@/services/apiClient';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import DateTimePicker, { useDefaultStyles, type DateType } from 'react-native-calendars-datepicker';
@@ -40,6 +41,27 @@ function buildAreaPath(points: ChartPoint[], baseY: number) {
 function formatChartValue(value: number) {
   return String(Math.round(value));
 }
+
+const TARGET_LINE_COLOR = '#7DD3FC';
+const ACTUAL_LINE_COLOR = DSColors.primary;
+
+const CHART_WIDTH = Dimensions.get('window').width - DSLayout.screenPadding * 2 - DSLayout.cardPadding * 2;
+const CHART_HEIGHT = Math.max(160, Math.min(200, Dimensions.get('window').width * 0.5));
+
+const makeChartConfig = (labelColor: string, gridColor: string) => ({
+  backgroundColor: DSColors.surface,
+  backgroundGradientFrom: DSColors.surface,
+  backgroundGradientTo: DSColors.surface,
+  decimalPlaces: 0,
+  color: (opacity = 1) => `rgba(160,0,0,${opacity * 0.25})`,
+  labelColor: () => labelColor,
+  style: { borderRadius: 16 },
+  propsForLabels: { fontSize: 13, fontWeight: '600' as const },
+  propsForBackgroundLines: { stroke: gridColor, strokeWidth: 0.6 },
+  fillShadowGradient: ACTUAL_LINE_COLOR,
+  fillShadowGradientOpacity: 0.08,
+  propsForDots: { r: '3' },
+});
 
 function clampNumber(rawValue: string, minValue: number, maxValue: number) {
   const normalized = rawValue.replace(/[^0-9.-]/g, '');
@@ -149,6 +171,11 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
   const [targetForceN, setTargetForceN] = useState<string>('70');
   const [useWarmup, setUseWarmup] = useState<boolean>(true);
   const [sessions, setSessions] = useState<any[]>([]);
+  const [showPlanModal, setShowPlanModal] = useState(false);
+  const [existingPlan, setExistingPlan] = useState<any>(null);
+  const [isEditingPlan, setIsEditingPlan] = useState(false);
+  const [isDeletingPlan, setIsDeletingPlan] = useState(false);
+  const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
 
   // Compute which weekdays are present in the selected plan range (0=Sun..6=Sat)
   function getAllowedWeekdays(start: string, end: string) {
@@ -192,6 +219,7 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
       const presetRes = await getPatientPreset(patientId);
       if (presetRes.success && presetRes.data) {
         const p = presetRes.data;
+        setExistingPlan(p);
         setTargetFlexion(clampNumber(String(p.targetFlexion ?? 120), REALISTIC_LIMITS.flexion.min, REALISTIC_LIMITS.flexion.max));
         setTargetExtension(clampNumber(String(p.targetExtension ?? 0), REALISTIC_LIMITS.extension.min, REALISTIC_LIMITS.extension.max));
         setSpeedLevel(clampNumber(String(p.speedLevel ?? 5), REALISTIC_LIMITS.speed.min, REALISTIC_LIMITS.speed.max));
@@ -199,6 +227,8 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
         setUseWarmup(Boolean(p.useWarmup ?? true));
         setTargetForceN(String(p.targetForceN ?? 70));
         setForceLevel(clampNumber(String(p.forceLevel ?? 1), REALISTIC_LIMITS.forceLevel.min, REALISTIC_LIMITS.forceLevel.max));
+      } else {
+        setExistingPlan(null);
       }
 
       const sessRes = await getPatientSessions(patientId, { limit: 20 });
@@ -583,7 +613,8 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
       <ThemedView style={[styles.chartCard, isNarrow ? styles.chartCardNarrow : {}, isAndroidTablet ? styles.chartCardTablet : {}]}>
         {sessions.length > 0 ? (
           (() => {
-            const recent = sessions.slice(-7);
+            const sortedSessions = sessions.slice().sort((a, b) => new Date((a as any).sessionDate).getTime() - new Date((b as any).sessionDate).getTime());
+            const recent = sortedSessions.slice(-7);
             const labels = recent.map((s) => new Date((s as any).sessionDate).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' }));
             const actuals = recent.map((s) => Number((s as any).actualMaxFlexion) || 0);
             const target = recent.map(() => Number(targetFlexion) || 0);
@@ -617,61 +648,50 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
             const actualArea = buildAreaPath(actualPoints, paddingTop + innerHeight);
             const targetArea = buildAreaPath(targetPoints, paddingTop + innerHeight);
 
+            // Render a LineChart (react-native-chart-kit) using the same data shape as programs.tsx
+            const chartData = {
+              labels,
+              datasets: [
+                { data: actuals, color: () => ACTUAL_LINE_COLOR, strokeWidth: 2 },
+                { data: target, color: () => TARGET_LINE_COLOR, strokeWidth: 2 },
+              ],
+              
+            };
+
+            const cfg = makeChartConfig(DSColors.text.secondary, DSColors.borderLight);
+            const usableWidth = Math.max(260, Math.min(chartWidth, width - (isNarrow ? 24 : 160)));
+
+            const chartRenderHeight = Math.max(160, chartHeight);
+
             return (
               <View style={{ width: '100%', alignItems: 'center' }}>
-                <Svg width={chartWidth} height={chartHeight}>
-                  <Defs>
-                    <LinearGradient id="actualFill" x1="0" y1="0" x2="0" y2="1">
-                      <Stop offset="0%" stopColor={DSColors.primary} stopOpacity="0.18" />
-                      <Stop offset="100%" stopColor={DSColors.primary} stopOpacity="0.02" />
-                    </LinearGradient>
-                    <LinearGradient id="targetFill" x1="0" y1="0" x2="0" y2="1">
-                      <Stop offset="0%" stopColor="#7DD3FC" stopOpacity="0.16" />
-                      <Stop offset="100%" stopColor="#7DD3FC" stopOpacity="0.02" />
-                    </LinearGradient>
-                  </Defs>
-
-                  {[0, 0.25, 0.5, 0.75, 1].map((step) => {
-                    const y = paddingTop + innerHeight * step;
-                    const value = Math.round(dataMax - range * step);
-                    return (
-                      <React.Fragment key={String(step)}>
-                        <Line x1={paddingLeft} y1={y} x2={chartWidth - paddingRight} y2={y} stroke={DSColors.borderLight} strokeWidth="1" opacity="0.8" />
-                        <SvgText x={paddingLeft - 8} y={y + 4} fontSize="10" fill={DSColors.text.secondary} textAnchor="end">
-                          {formatChartValue(value)}°
-                        </SvgText>
-                      </React.Fragment>
-                    );
-                  })}
-
-                  <Path d={actualArea} fill="url(#actualFill)" />
-                  <Path d={targetArea} fill="url(#targetFill)" />
-                  {targetPath ? <Path d={targetPath} stroke="#7DD3FC" strokeWidth="2.5" fill="none" strokeDasharray="6 4" /> : null}
-                  {actualPath ? <Path d={actualPath} stroke={DSColors.primary} strokeWidth="3" fill="none" /> : null}
-
-                  {actualPoints.map((point, index) => (
-                    <Circle key={`actual-${index}`} cx={point.x} cy={point.y} r="4" fill={DSColors.primary} />
-                  ))}
-                  {targetPoints.map((point, index) => (
-                    <Circle key={`target-${index}`} cx={point.x} cy={point.y} r="3.5" fill="#7DD3FC" />
-                  ))}
-
-                  {labels.map((label, index) => {
-                    const x = mapPoint(0, index, labels.length).x;
-                    return (
-                      <SvgText
-                        key={`${label}-${index}`}
-                        x={x}
-                        y={chartHeight - 10}
-                        fontSize="10"
-                        fill={DSColors.text.secondary}
-                        textAnchor="middle"
-                      >
-                        {label}
-                      </SvgText>
-                    );
-                  })}
-                </Svg>
+                <View style={{ width: usableWidth }}>
+                  <LineChart
+                    data={chartData as any}
+                    width={usableWidth}
+                    height={chartRenderHeight}
+                    chartConfig={cfg}
+                    bezier
+                    withDots
+                    withShadow
+                    withInnerLines
+                    withOuterLines={false}
+                    style={{ borderRadius: 12, overflow: 'hidden' }}
+                    formatYLabel={(v) => `${Math.round(Number(v))}°`}
+                    fromZero={false}
+                    yLabelsOffset={8}
+                  />
+                  <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 16, marginTop: 8 }}>
+                    <View style={styles.androidTabletLegendItem}>
+                      <View style={[styles.androidTabletLegendDot, { backgroundColor: ACTUAL_LINE_COLOR }]} />
+                      <Text style={styles.androidTabletLegendText}>Actual Flexion</Text>
+                    </View>
+                    <View style={styles.androidTabletLegendItem}>
+                      <View style={[styles.androidTabletLegendDot, { backgroundColor: TARGET_LINE_COLOR }]} />
+                      <Text style={styles.androidTabletLegendText}>Target Flexion</Text>
+                    </View>
+                  </View>
+                </View>
               </View>
             );
           })()
@@ -685,7 +705,7 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
         <ThemedText type="default" style={styles.empty}>ยังไม่มีประวัติการบำบัด</ThemedText>
       ) : (
         <View>
-          {sessions.map((item) => (
+          {sessions.slice().sort((a, b) => new Date((b as any).sessionDate).getTime() - new Date((a as any).sessionDate).getTime()).map((item) => (
             <ThemedView key={String((item as any).id)} style={styles.sessionRow}>
               <Text style={styles.sessionDate}>{new Date((item as any).sessionDate).toLocaleString()}</Text>
               <Text style={styles.sessionText}>Actual Max Flexion: {(item as any).actualMaxFlexion}</Text>
@@ -782,7 +802,7 @@ const styles = StyleSheet.create({
     color: DSColors.text.primary,
   },
   chartCard: {
-    height: 160,
+    minHeight: 220,
     backgroundColor: DSColors.surface,
     borderRadius: DSShape.radiusCard,
     borderWidth: 1,
@@ -790,6 +810,8 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     ...DSShadowSoft,
   },
   chartCardTablet: {
@@ -801,7 +823,7 @@ const styles = StyleSheet.create({
     borderColor: DSColors.border,
   },
   chartCardNarrow: {
-    height: 180,
+    minHeight: 240,
   },
   androidTabletProgressWrap: {
     width: '100%',

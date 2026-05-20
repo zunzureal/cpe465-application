@@ -105,6 +105,7 @@ export interface DoctorPatient {
   name: string;
   hnCode: string;
   age: number;
+  phoneNumber?: string;
   hospitalId: number;
   primaryDoctorId: number;
   createdAt: string;
@@ -149,6 +150,39 @@ export async function getDoctorPatient(
   patientId: number
 ): Promise<ApiResponse<{ id: number; name: string; hnCode: string; age?: number; phoneNumber?: string }>> {
   return apiCall(`/api/patients/${patientId}`, {}, authToken);
+}
+
+export interface UpdatePatientPayload {
+  name?: string;
+  hnCode?: string;
+  phoneNumber?: string;
+  age?: number;
+}
+
+/**
+ * Update patient info (doctor only)
+ */
+export async function updatePatient(
+  authToken: string,
+  patientId: number,
+  body: UpdatePatientPayload
+): Promise<ApiResponse<{ id: number }>> {
+  return apiCall<{ id: number }>(`/api/patients/${patientId}`, {
+    method: 'PUT',
+    body,
+  }, authToken);
+}
+
+/**
+ * Delete treatment plan for a patient (doctor only)
+ */
+export async function deleteTreatmentPlan(
+  authToken: string,
+  patientId: number
+): Promise<ApiResponse<{ success: boolean }>> {
+  return apiCall<{ success: boolean }>(`/api/patients/${patientId}/plan`, {
+    method: 'DELETE',
+  }, authToken);
 }
 
 export interface PutPatientPresetPayload {
@@ -236,6 +270,14 @@ export async function getPatientPreset(
   patientId: number
 ): Promise<ApiResponse<TreatmentPlanResponse>> {
   return apiCall<TreatmentPlanResponse>(`/api/presets/${patientId}`);
+}
+
+// Delete patient (doctor only) — server may not implement this; call will return error if unavailable
+export async function deletePatient(
+  authToken: string,
+  patientId: number
+): Promise<ApiResponse<{}>> {
+  return apiCall<{}>(`/api/patients/${patientId}`, { method: 'DELETE' }, authToken);
 }
 
 // ─── SESSION ENDPOINTS ────────────────────────────────────────────────────
