@@ -6,7 +6,7 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { ActivityIndicator, Dimensions, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { LineChart } from 'react-native-chart-kit';
 // Chart types from react-native-chart-kit are incompatible with our React typings
 // in some environments; provide a local any-typed alias for JSX usage.
@@ -22,6 +22,39 @@ import {
   DSTypography,
 } from '@/constants/design-system';
 import { useAuth } from '@/contexts/AuthContext';
+
+// ─── Period selector ──────────────────────────────────────────────────────────
+type Period = '7d' | '30d' | 'all';
+
+const PERIOD_OPTIONS: { key: Period; label: string }[] = [
+  { key: '7d',  label: '7 วัน'   },
+  { key: '30d', label: '30 วัน'  },
+  { key: 'all', label: 'ทั้งหมด' },
+];
+
+function PeriodSelector({ selected, onSelect }: { selected: Period; onSelect: (p: Period) => void }) {
+  return (
+    <View style={styles.periodRow}>
+      {PERIOD_OPTIONS.map(({ key, label }) => (
+        <Pressable
+          key={key}
+          style={[styles.periodTab, selected === key && styles.periodTabActive]}
+          onPress={() => onSelect(key)}
+        >
+          <Text style={[styles.periodTabText, selected === key && styles.periodTabTextActive]}>
+            {label}
+          </Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
+// ─── Chart dimensions (fixed once at load — never reactive) ──────────────────
+const CHART_WIDTH = Dimensions.get('window').width
+  - DSLayout.screenPadding * 2
+  - DSLayout.cardPadding * 2;
+const CHART_HEIGHT = Math.max(180, Math.min(220, Dimensions.get('window').width * 0.55));
 
 // ─── Chart line colors ────────────────────────────────────────────────────────
 const TARGET_LINE_COLOR = '#7DD3FC'; // light-blue dashed target line
@@ -81,6 +114,9 @@ function transformApiSessions(apiSessions: any[]): SessionRecord[] {
   const dayMap = new Map<string, SessionRecord[]>();
   
   apiSessions.forEach((apiSession) => {
+    // Skip ghost sessions (started but never performed — no flexion data recorded)
+    if (apiSession.durationCompleted === 0 && apiSession.actualMaxFlexion === 0) return;
+
     const sessionDate = new Date(apiSession.sessionDate);
     const dateStr = sessionDate.toLocaleDateString('th-TH', {
       year: 'numeric',
@@ -297,11 +333,11 @@ function SessionCard({ time, sessionNum, sessionsPerDay, achievedFlexion, target
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
 export default function HistoryScreen() {
-  const { width: screenWidth } = useWindowDimensions();
   const auth = useAuth();
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [selectedPeriod, setSelectedPeriod] = useState<Period>('7d');
 
   // Fetch sessions from API when component mounts or patientId changes
   useEffect(() => {
@@ -344,40 +380,42 @@ export default function HistoryScreen() {
     loadSessions();
   }, [auth.patientId]);
 
-  const displaySessions = sessions.length > 0 ? sessions : MOCK_SESSIONS;
+  // displaySessions: filtered by period — drives summary stats + session list
+  const displaySessions = useMemo(() => {
+    const base = isLoading ? [] : (sessions.length > 0 ? sessions : MOCK_SESSIONS);
+    if (selectedPeriod === 'all') return base;
+    const days = selectedPeriod === '7d' ? 7 : 30;
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+    return base.filter((s) => s.ts >= cutoff);
+  }, [isLoading, sessions, selectedPeriod]);
   const dayGroups = useMemo(() => groupByDay(displaySessions), [displaySessions]);
 
-  // Chart: one point per day (best achieved flexion of the day)
-  const { chartData, yMin, yMax } = useMemo(() => {
-    const reversedGroups = [...dayGroups].reverse();
-    const allValues = displaySessions.flatMap((s) => [s.achievedFlexion, s.targetFlexion]);
-    const computedMin = Math.max(0, Math.floor(Math.min(...allValues) - 5));
-    const computedMax = Math.ceil(Math.max(...allValues) + 5);
+  const Y_FLOOR = 50;
+  const Y_CEILING = 130;
+  const MAX_CHART_POINTS = 10;
+
+  const chartData = useMemo(() => {
+    if (dayGroups.length === 0) return null;
+    const reversedGroups = [...dayGroups.slice(0, MAX_CHART_POINTS)].reverse();
+
+    const labels = reversedGroups.map((g) => {
+      const d = new Date(g.sessions[0].ts);
+      return `${d.getDate()}/${d.getMonth() + 1}`;
+    });
+    const actualValues = reversedGroups.map((g) => Math.max(...g.sessions.map((s) => s.achievedFlexion)));
+    const targetValues = reversedGroups.map((g) => g.sessions[0].targetFlexion);
+
     return {
-      chartData: {
-        labels: reversedGroups.map((g) => g.dayLabel),
-        datasets: [
-          {
-            data: reversedGroups.map((g) => g.sessions[0].targetFlexion),
-            color: (): string => TARGET_LINE_COLOR,
-            strokeWidth: 2,
-            strokeDashArray: [6, 4],
-          },
-          {
-            data: reversedGroups.map((g) => Math.max(...g.sessions.map((s) => s.achievedFlexion))),
-            color: (): string => ACTUAL_LINE_COLOR,
-            strokeWidth: 3,
-          },
-        ],
-      },
-      yMin: computedMin,
-      yMax: computedMax,
+      labels,
+      datasets: [
+        { data: reversedGroups.map(() => Y_FLOOR),   color: (): string => 'rgba(0,0,0,0)', strokeWidth: 0 },
+        { data: reversedGroups.map(() => Y_CEILING), color: (): string => 'rgba(0,0,0,0)', strokeWidth: 0 },
+        { data: targetValues, color: (): string => TARGET_LINE_COLOR, strokeWidth: 2, strokeDashArray: [6, 4] },
+        { data: actualValues, color: (): string => ACTUAL_LINE_COLOR, strokeWidth: 3 },
+      ],
     };
   }, [dayGroups]);
 
-  const contentPadding = DSLayout.screenPadding * 2;
-  const chartWidth = Math.max(screenWidth - contentPadding - 8, 200);
-  const chartHeight = Math.max(180, Math.min(220, screenWidth * 0.55));
   const totalSessions = displaySessions.length;
   const totalDays = dayGroups.length;
 
@@ -388,6 +426,8 @@ export default function HistoryScreen() {
         showsVerticalScrollIndicator={false}
       >
 
+        <PeriodSelector selected={selectedPeriod} onSelect={setSelectedPeriod} />
+
         {/* ── Summary banner ─────────────────────────────────────────────── */}
         <View style={[styles.summaryCard, DSShadow]}>
           <View style={styles.summaryIconWrap}>
@@ -395,10 +435,11 @@ export default function HistoryScreen() {
           </View>
           <View style={styles.summaryTexts}>
             <Text style={styles.summaryText}>
-              เยี่ยมมาก! ทำ {totalSessions} ครั้ง ใน {totalDays} วันสัปดาห์นี้
+              เยี่ยมมาก! ทำ {totalSessions} ครั้ง ใน {totalDays} วัน
+              {selectedPeriod === '7d' ? ' (7 วันล่าสุด)' : selectedPeriod === '30d' ? ' (30 วันล่าสุด)' : ''}
             </Text>
             <Text style={styles.summarySub}>
-              {totalSessions} sessions across {totalDays} days this week.
+              {totalSessions} sessions across {totalDays} days.
             </Text>
           </View>
         </View>
@@ -411,24 +452,31 @@ export default function HistoryScreen() {
           </View>
           <Text style={styles.chartSubtitle}>Flexion Progress</Text>
 
-          <AnyLineChart
-            data={chartData}
-            width={chartWidth}
-            height={chartHeight}
-            yAxisLabel=""
-            yAxisSuffix="°"
-            {...({ yAxisMin: yMin, yAxisMax: yMax, fromZero: false } as Record<string, unknown>)}
-            bezier
-            withInnerLines
-            withOuterLines
-            chartConfig={makeChartConfig(DSColors.text.secondary, DSColors.borderLight)}
-            style={styles.chart}
-            withDots
-            withVerticalLabels
-            withHorizontalLabels
-            segments={5}
-            formatYLabel={(v: string) => `${v}°`}
-          />
+          {isLoading || !chartData ? (
+            <View style={[styles.chartPlaceholder, { height: CHART_HEIGHT }]}>
+              {isLoading
+                ? <ActivityIndicator size="large" color={DSColors.primary} />
+                : <Text style={styles.chartNoData}>ยังไม่มีข้อมูลการออกกำลังกาย</Text>
+              }
+            </View>
+          ) : (
+            <AnyLineChart
+              data={chartData}
+              width={CHART_WIDTH}
+              height={CHART_HEIGHT}
+              yAxisLabel=""
+              fromZero={false}
+              withInnerLines
+              withOuterLines
+              chartConfig={makeChartConfig(DSColors.text.secondary, DSColors.borderLight)}
+              style={styles.chart}
+              withDots
+              withVerticalLabels
+              withHorizontalLabels
+              segments={5}
+              formatYLabel={(v: string) => `${Math.round(Number(v))}°`}
+            />
+          )}
 
           <View style={styles.legend}>
             <View style={styles.legendItem}>
@@ -559,6 +607,7 @@ const styles = StyleSheet.create({
     padding: DSLayout.cardPadding,
     marginBottom: DSLayout.sectionGap,
     alignItems: 'center',
+    overflow: 'hidden',
   },
   chartTitleRow: {
     flexDirection: 'row',
@@ -578,6 +627,15 @@ const styles = StyleSheet.create({
   chart: {
     borderRadius: DSShape.radiusButton,
     alignSelf: 'stretch',
+  },
+  chartPlaceholder: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  chartNoData: {
+    ...DSTypography.caption,
+    color: DSColors.text.secondary,
   },
   legend: {
     flexDirection: 'row',
@@ -796,4 +854,30 @@ const styles = StyleSheet.create({
   },
 
   bottomSpacer: { height: 24 },
+
+  // ── Period selector ─────────────────────────────────────────────────────────
+  periodRow: {
+    flexDirection: 'row',
+    backgroundColor: DSColors.surface,
+    borderRadius: DSShape.radiusChip,
+    padding: 4,
+    marginBottom: DSLayout.itemGap,
+    gap: 4,
+  },
+  periodTab: {
+    flex: 1,
+    paddingVertical: 8,
+    alignItems: 'center',
+    borderRadius: DSShape.radiusChip - 2,
+  },
+  periodTabActive: {
+    backgroundColor: DSColors.primary,
+  },
+  periodTabText: {
+    ...DSTypography.captionBold,
+    color: DSColors.text.secondary,
+  },
+  periodTabTextActive: {
+    color: DSColors.text.inverse,
+  },
 });

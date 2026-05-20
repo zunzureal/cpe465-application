@@ -1,8 +1,8 @@
+import { CommonActions } from '@react-navigation/native';
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { Stack } from 'expo-router';
+import { Stack, useNavigation } from 'expo-router';
 import { ActivityIndicator, StyleSheet, View, Alert, Pressable } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import 'react-native-reanimated';
 
@@ -17,10 +17,10 @@ import { DevicePairedProvider } from '@/contexts/DevicePairedContext';
 import '@/global.css';
 
 function LogoutButton() {
-  const router = useRouter();
   const auth = useAuth();
+  const navigation = useNavigation();
 
-  const handleLogout = async () => {
+  const handleLogout = () => {
     Alert.alert(
       'ยืนยันการออกจากระบบ',
       'คุณต้องการออกจากระบบและกลับไปที่หน้าเลือกบทบาทหรือไม่?',
@@ -32,15 +32,14 @@ function LogoutButton() {
           onPress: async () => {
             try {
               await auth.logout();
+              // Reset the root Stack to only [index] — no back button possible.
+              // CommonActions.reset bypasses URL/Tabs resolution entirely.
+              navigation.dispatch(
+                CommonActions.reset({ index: 0, routes: [{ name: 'index' }] })
+              );
             } catch (err) {
               console.error('[LogoutButton] Logout error:', err);
               Alert.alert('ออกจากระบบไม่สำเร็จ', 'กรุณาลองอีกครั้ง');
-              return;
-            }
-            try {
-              router.replace('/');
-            } catch (navErr) {
-              console.warn('[LogoutButton] router.replace failed', navErr);
             }
           },
         },
@@ -82,7 +81,8 @@ function RootContent() {
     );
   }
 
-  // When user is not logged in, show minimal navigation (just login + role selection)
+  // Unauthenticated: minimal Stack — React Navigation discards any screens not
+  // listed here (e.g. (tabs)) and falls back to `index` (RoleSelectionScreen).
   if (!auth.isLoggedIn) {
     return (
       <Stack
@@ -105,32 +105,30 @@ function RootContent() {
     );
   }
 
-  // When user is logged in, show full app navigation with logout button
+  // Authenticated: full Stack with LogoutButton in header.
   return (
-    <>
-      <Stack
-        screenOptions={{
-          header: () => <CustomHeader rightSlot={<LogoutButton />} />,
-          headerShown: true,
-          contentStyle: { backgroundColor: DSColors.background },
-        }}
-      >
-        <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="doctor" />
-        <Stack.Screen
-          name="therapy-session"
-          options={{ header: () => <CustomHeader showBack /> }}
-        />
-        <Stack.Screen
-          name="manual-setup"
-          options={{ header: () => <CustomHeader showBack /> }}
-        />
-        <Stack.Screen
-          name="modal"
-          options={{ presentation: 'modal', headerShown: false }}
-        />
-      </Stack>
-    </>
+    <Stack
+      screenOptions={{
+        header: () => <CustomHeader rightSlot={<LogoutButton />} />,
+        headerShown: true,
+        contentStyle: { backgroundColor: DSColors.background },
+      }}
+    >
+      <Stack.Screen name="(tabs)" />
+      <Stack.Screen name="doctor" />
+      <Stack.Screen
+        name="therapy-session"
+        options={{ header: () => <CustomHeader showBack /> }}
+      />
+      <Stack.Screen
+        name="manual-setup"
+        options={{ header: () => <CustomHeader showBack /> }}
+      />
+      <Stack.Screen
+        name="modal"
+        options={{ presentation: 'modal', headerShown: false }}
+      />
+    </Stack>
   );
 }
 

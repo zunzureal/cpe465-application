@@ -4,7 +4,8 @@
  */
 
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { CommonActions } from '@react-navigation/native';
+import { useNavigation, useRouter } from 'expo-router';
 import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
 import { DeviceConnectionModal, MOCK_DEVICE_DISPLAY_NAME } from '@/components/ui/DeviceConnectionModal';
@@ -21,6 +22,7 @@ import { useMockDeviceConnection } from '@/hooks/useMockDeviceConnection';
 // Mock
 export default function SettingsScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const auth = useAuth();
   const { isPaired, hydrated, clearDevicePaired } = useDevicePaired();
   const patientName = auth.patientName ?? 'ผู้ใช้งาน';
@@ -79,15 +81,14 @@ export default function SettingsScreen() {
           onPress: async () => {
             try {
               await auth.logout();
+              // useNavigation() here is the Tabs navigator — must go up to the root Stack
+              const rootNav = navigation.getParent();
+              (rootNav ?? navigation).dispatch(
+                CommonActions.reset({ index: 0, routes: [{ name: 'index' }] })
+              );
             } catch (err) {
               console.error('[explore] Logout error:', err);
               Alert.alert('ออกจากระบบไม่สำเร็จ', 'กรุณาลองอีกครั้ง');
-              return;
-            }
-            try {
-              router.replace('/');
-            } catch (navErr) {
-              console.warn('[explore] router.replace failed', navErr);
             }
           },
         },
