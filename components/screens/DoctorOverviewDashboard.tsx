@@ -23,7 +23,7 @@ import {
   Switch,
   ScrollView,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, usePathname } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -301,24 +301,22 @@ export function DoctorOverviewDashboard() {
       <View style={[styles.container, isTablet && styles.containerTablet]}>
         {/* Header provided by RootLayout Stack */}
 
-        {/* Add Patient Modal */}
-        <Modal visible={showAddModal} animationType="slide" onRequestClose={() => setShowAddModal(false)}>
-          <SafeAreaView style={{ flex: 1 }}>
-            <KeyboardAvoidingView
-              style={styles.addModalKeyboardWrap}
-              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-              keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
-            >
-              <ThemedView style={styles.addModalShell}>
-                <ScrollView
-                  style={styles.addModalBody}
-                  contentContainerStyle={[styles.addModalScroll, { padding: DSLayout.screenPadding }]}
-                  keyboardShouldPersistTaps="handled"
-                  nestedScrollEnabled
-                  showsVerticalScrollIndicator
-                >
-                  <ThemedText type="title" style={{ fontSize: 22, marginTop: 12 ,marginBottom: 24, color: DSColors.text.primary }}>ข้อมูลผู้ป่วย (Patient Information)</ThemedText>
+        {/* Add Patient Modal — same layout as Edit modal (plan modal style) */}
+        <Modal visible={showAddModal} transparent animationType="slide" onRequestClose={() => setShowAddModal(false)}>
+          <View style={styles.editModalOverlay}>
+            <View style={styles.editModalCard}>
+              <View style={styles.editModalHeader}>
+                <Text style={styles.editModalTitle}>เพิ่มผู้ป่วย</Text>
+                <Pressable onPress={() => setShowAddModal(false)} style={{ padding: 8 }}>
+                  <Text style={{ fontSize: 18, color: DSColors.text.secondary, fontWeight: '600' }}>✕</Text>
+                </Pressable>
+              </View>
 
+              <ScrollView
+                style={{ flex: 1 }}
+                contentContainerStyle={{ padding: 20, paddingBottom: 8 }}
+                keyboardShouldPersistTaps="handled"
+              >
                 <View style={styles.rowSplit}>
                   <View style={{ flex: 1, marginRight: 8 }}>
                     <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>ชื่อ (First Name)</ThemedText>
@@ -403,28 +401,18 @@ export function DoctorOverviewDashboard() {
                   <Pressable style={styles.selectBox} onPress={() => openPicker('machine')}>
                     <Text style={{ color: newMachine ? DSColors.text.primary : DSColors.text.secondary }}>{newMachine || '— เลือกเครื่อง —'}</Text>
                   </Pressable> */}
-                </ScrollView>
+              </ScrollView>
 
-                <View style={styles.addModalActionsFooter}>
-                  <View style={styles.addModalActions}>
-                  <Pressable
-                    onPress={() => setShowAddModal(false)}
-                    style={({ pressed }) => [styles.outlineButton, pressed && styles.pressed]}
-                  >
-                    <Text style={styles.outlineButtonText}>ยกเลิก</Text>
-                  </Pressable>
-
-                  <Pressable
-                    onPress={handleAddPatient}
-                    style={({ pressed }) => [styles.primaryButton, pressed && styles.primaryPressed]}
-                  >
-                    <Text style={styles.primaryButtonText}>บันทึก</Text>
-                  </Pressable>
-                  </View>
-                </View>
-              </ThemedView>
-            </KeyboardAvoidingView>
-          </SafeAreaView>
+              <View style={styles.editModalFooter}>
+                <Pressable onPress={() => setShowAddModal(false)} style={[styles.editOutlineButton, { flex: 1 }]}>
+                  <Text style={[styles.editOutlineButtonText, { textAlign: 'center' }]}>ยกเลิก</Text>
+                </Pressable>
+                <Pressable onPress={handleAddPatient} style={[styles.editPrimaryButton, { flex: 2 }]}>
+                  <Text style={[styles.editPrimaryButtonText, { textAlign: 'center' }]}>บันทึก</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
         </Modal>
 
         <Modal visible={activePicker !== null} transparent animationType="fade" onRequestClose={closePicker}>
@@ -560,6 +548,7 @@ function PatientRow({ item }: { item: Patient }) {
   const [busy, setBusy] = useState(false);
   const { authToken } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
   const [confirmDeleteVisible, setConfirmDeleteVisible] = useState(false);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editName, setEditName] = useState('');
@@ -624,7 +613,7 @@ function PatientRow({ item }: { item: Patient }) {
         alert('บันทึกการแก้ไขเสร็จแล้ว');
         setEditModalVisible(false);
         // Refresh page to show updated data
-        router.replace(router.asPath);
+        router.replace(pathname as any);
       }
     } catch (err) {
       console.error('[DoctorOverviewDashboard] Edit error:', err);
@@ -646,7 +635,7 @@ function PatientRow({ item }: { item: Patient }) {
         alert(res.error || 'ไม่สามารถลบผู้ป่วยได้ (backend may not support delete)');
       } else {
         // refresh list by emitting a navigation refresh (simpler) — rely on parent page to refetch on focus
-        router.replace(router.asPath);
+        router.replace(pathname as any);
       }
     } catch (err) {
       console.error('[DoctorOverviewDashboard] Delete error:', err);
@@ -675,40 +664,42 @@ function PatientRow({ item }: { item: Patient }) {
       <View style={styles.rowActions}>
         <Pressable
           onPress={openEditModal}
-          style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
+          style={({ pressed }) => pressed && styles.pressed}
           hitSlop={8}
           accessibilityLabel="Edit patient"
         >
-          <Ionicons name="pencil" size={18} color={DSColors.text.primary} />
+          <View style={styles.iconButtonEdit}>
+            <Ionicons name="pencil" size={22} color={DSColors.warning} />
+          </View>
         </Pressable>
 
         <Pressable
           onPress={() => setConfirmDeleteVisible(true)}
-          style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
+          style={({ pressed }) => pressed && styles.pressed}
           hitSlop={8}
           accessibilityLabel="Delete patient"
         >
-          <Ionicons name="trash" size={18} color={DSColors.danger} />
+          <View style={styles.iconButtonDelete}>
+            <Ionicons name="trash" size={22} color={DSColors.danger} />
+          </View>
         </Pressable>
 
-        {/* Edit Modal */}
-        <Modal visible={editModalVisible} animationType="slide" onRequestClose={() => setEditModalVisible(false)}>
-          <SafeAreaView style={{ flex: 1 }}>
-            <KeyboardAvoidingView
-              style={styles.addModalKeyboardWrap}
-              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-              keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
-            >
-              <ThemedView style={styles.addModalShell}>
-                <ScrollView
-                  style={styles.addModalBody}
-                  contentContainerStyle={[styles.addModalScroll, { padding: DSLayout.screenPadding }]}
-                  keyboardShouldPersistTaps="handled"
-                  nestedScrollEnabled
-                  showsVerticalScrollIndicator
-                >
-                  <ThemedText type="title" style={{ fontSize: 22, marginTop: 12, marginBottom: 24, color: DSColors.text.primary }}>แก้ไขข้อมูลผู้ป่วย</ThemedText>
+        {/* Edit Modal — same layout as plan modal in app/doctor/patient/[id].tsx */}
+        <Modal visible={editModalVisible} transparent animationType="slide" onRequestClose={() => setEditModalVisible(false)}>
+          <View style={styles.editModalOverlay}>
+            <View style={styles.editModalCard}>
+              <View style={styles.editModalHeader}>
+                <Text style={styles.editModalTitle}>ปรับข้อมูลผู้ป่วย</Text>
+                <Pressable onPress={() => setEditModalVisible(false)} style={{ padding: 8 }}>
+                  <Text style={{ fontSize: 18, color: DSColors.text.secondary, fontWeight: '600' }}>✕</Text>
+                </Pressable>
+              </View>
 
+              <ScrollView
+                style={{ flex: 1 }}
+                contentContainerStyle={{ padding: 20, paddingBottom: 8 }}
+                keyboardShouldPersistTaps="handled"
+              >
                   <View style={styles.rowSplit}>
                     <View style={{ flex: 1, marginRight: 8 }}>
                       <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>ชื่อ</ThemedText>
@@ -773,27 +764,21 @@ function PatientRow({ item }: { item: Patient }) {
                   </View>
                 </ScrollView>
 
-                <View style={styles.addModalActionsFooter}>
-                  <View style={styles.addModalActions}>
-                    <Pressable
-                      onPress={() => setEditModalVisible(false)}
-                      style={({ pressed }) => [styles.outlineButton, pressed && styles.pressed]}
-                    >
-                      <Text style={styles.outlineButtonText}>ยกเลิก</Text>
-                    </Pressable>
-
-                    <Pressable
-                      onPress={handleSaveEdit}
-                      style={({ pressed }) => [styles.primaryButton, pressed && styles.primaryPressed]}
-                      disabled={busy}
-                    >
-                      <Text style={styles.primaryButtonText}>{busy ? 'กำลังบันทึก...' : 'บันทึก'}</Text>
-                    </Pressable>
-                  </View>
-                </View>
-              </ThemedView>
-            </KeyboardAvoidingView>
-          </SafeAreaView>
+              <View style={styles.editModalFooter}>
+                <Pressable onPress={() => setEditModalVisible(false)} style={[styles.editOutlineButton, { flex: 1 }]}>
+                  <Text style={[styles.editOutlineButtonText, { textAlign: 'center' }]}>ยกเลิก</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => { if (!busy) handleSaveEdit(); }}
+                  style={[styles.editPrimaryButton, { flex: 2, opacity: busy ? 0.6 : 1 }]}
+                >
+                  <Text style={[styles.editPrimaryButtonText, { textAlign: 'center' }]}>
+                    {busy ? 'กำลังบันทึก...' : 'บันทึก'}
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
         </Modal>
 
         {/* Delete Confirmation Modal */}
@@ -985,6 +970,61 @@ const styles = StyleSheet.create({
   addModalKeyboardWrap: {
     flex: 1,
   },
+  // Edit modal — copied verbatim from plan modal in app/doctor/patient/[id].tsx
+  editModalOverlay: {
+    flex: 1,
+    backgroundColor: DSColors.background,
+  },
+  editModalCard: {
+    flex: 1,
+    backgroundColor: DSColors.background,
+  },
+  editModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: DSColors.borderLight,
+  },
+  editModalTitle: {
+    ...DSTypography.h3,
+    color: DSColors.text.primary,
+  },
+  editModalFooter: {
+    flexDirection: 'row',
+    gap: 10,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderTopWidth: 1,
+    borderTopColor: DSColors.borderLight,
+    backgroundColor: DSColors.background,
+  },
+  editOutlineButton: {
+    borderWidth: 1,
+    borderColor: DSColors.border,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: DSShape.radiusButton,
+    backgroundColor: DSColors.surface,
+    alignItems: 'center',
+  },
+  editOutlineButtonText: {
+    color: DSColors.text.primary,
+    fontWeight: '700',
+  },
+  editPrimaryButton: {
+    backgroundColor: DSColors.primary,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: DSShape.radiusButton,
+    alignItems: 'center',
+  },
+  editPrimaryButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
   addModalBody: {
     flex: 1,
     backgroundColor: DSColors.surface,
@@ -1146,7 +1186,7 @@ const styles = StyleSheet.create({
     backgroundColor: DSColors.primaryDark,
   },
   primaryButtonText: {
-    color: DSColors.text.primary,
+    color: '#FFFFFF',
     fontWeight: '700',
   },
   pressed: { opacity: 0.8 },
@@ -1165,6 +1205,7 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent:"space-between",
     minHeight: 74,
     paddingVertical: 14,
     paddingHorizontal: DSLayout.cardPadding,
@@ -1217,7 +1258,10 @@ const styles = StyleSheet.create({
   rowActions: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     marginLeft: 8,
+    // borderWidth: 1,
+    //width:60
   },
   iconButton: {
     width: 36,
@@ -1229,5 +1273,55 @@ const styles = StyleSheet.create({
     backgroundColor: DSColors.surface,
     borderWidth: 1,
     borderColor: DSColors.border,
+  },
+  // Match summaryIconWrap style exactly so the block tint reads identically
+  iconButtonEdit: {
+    width: 48,
+    height: 48,
+    borderRadius: DSShape.radiusButton,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: DSColors.warningLight,
+  },
+  iconButtonDelete: {
+    width: 48,
+    height: 48,
+    borderRadius: DSShape.radiusButton,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft:4,
+    backgroundColor: DSColors.dangerLight,
+  },
+  actionButtonEdit: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: DSShape.radiusButton,
+    marginLeft: 8,
+    backgroundColor: DSColors.primaryLight,
+    borderWidth: 1,
+    borderColor: DSColors.primary,
+  },
+  actionButtonEditText: {
+    ...DSTypography.captionBold,
+    color: DSColors.primary,
+  },
+  actionButtonDelete: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: DSShape.radiusButton,
+    marginLeft: 8,
+    backgroundColor: DSColors.dangerLight,
+    borderWidth: 1,
+    borderColor: DSColors.danger,
+  },
+  actionButtonDeleteText: {
+    ...DSTypography.captionBold,
+    color: DSColors.danger,
   },
 });

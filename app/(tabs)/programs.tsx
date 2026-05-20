@@ -13,7 +13,7 @@ import { LineChart } from 'react-native-chart-kit';
 const AnyLineChart = LineChart as any;
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { getPatientSessions } from '@/services/apiClient';
+import { getPatientSessions, type SessionResponse } from '@/services/apiClient';
 import {
   DSColors,
   DSLayout,
@@ -78,6 +78,16 @@ interface SessionRecord {
   sessionStatus?: 'SUCCESS';
 }
 
+interface MissedRecord {
+  id: string;
+  date: string;
+  ts: number;
+  dayLabel: string;
+  targetFlexion: number;
+  expectedSessions: number;
+  completedSessions: number;
+}
+
 function resolveSessionStatus(apiSession: any): 'SUCCESS' | undefined {
   const stored = String(apiSession.sessionStatus ?? apiSession.status ?? '').toUpperCase();
   return stored === 'SUCCESS' ? 'SUCCESS' : undefined;
@@ -93,31 +103,50 @@ function resolveDisplaySessionStatus(
   return 'INCOMPLETE';
 }
 
-// Transform API SessionResponse to SessionRecord
-function transformApiSessions(apiSessions: any[]): SessionRecord[] {
+// Transform API SessionResponse to SessionRecord + MissedRecord
+function transformApiSessions(apiSessions: SessionResponse[]): {
+  sessions: SessionRecord[];
+  missed: MissedRecord[];
+} {
   const dayMap = new Map<string, SessionRecord[]>();
-  
-  apiSessions.forEach((apiSession) => {
-    // Skip ghost sessions (started but never performed — no flexion data recorded)
-    if (apiSession.durationCompleted === 0 && apiSession.actualMaxFlexion === 0) return;
+  const missedByDate = new Map<string, MissedRecord>();
 
+  apiSessions.forEach((apiSession) => {
     const sessionDate = new Date(apiSession.sessionDate);
     const dateStr = sessionDate.toLocaleDateString('th-TH', {
       year: 'numeric',
       month: 'long',
       day: 'numeric',
     });
-    
+    const dayLabel = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'][sessionDate.getDay()];
+
+    if (apiSession.kind === 'missed') {
+      // Only register missed for the day; later we'll merge with session list
+      if (!missedByDate.has(dateStr)) {
+        missedByDate.set(dateStr, {
+          id: `missed-${apiSession.planId}-${dateStr}`,
+          date: dateStr,
+          ts: sessionDate.getTime(),
+          dayLabel,
+          targetFlexion: apiSession.plan?.targetFlexion ?? 0,
+          expectedSessions: apiSession.expectedSessions,
+          completedSessions: apiSession.completedSessions,
+        });
+      }
+      return;
+    }
+
+    // Skip ghost sessions (started but never performed — no flexion data recorded)
+    if (apiSession.durationCompleted === 0 && apiSession.actualMaxFlexion === 0) return;
+
     const timeStr = sessionDate.toLocaleTimeString('th-TH', {
       hour: '2-digit',
       minute: '2-digit',
     });
-    
-    const dayLabel = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'][sessionDate.getDay()];
-    
+
     // Normalize painLevel coming from session_logs. Backend may store a broader range
     // (e.g., 0, 3, 5, 8). Map them into our UI buckets: 1 (no pain), 2 (moderate), 3 (severe).
-    const rawPain = Number(apiSession.painLevel ?? apiSession.pain_level ?? 1);
+    const rawPain = Number(apiSession.painLevel ?? 1);
     let normalizedPain: 1 | 2 | 3 = 1;
     if (isNaN(rawPain) || rawPain <= 1) {
       normalizedPain = 1;
@@ -143,7 +172,7 @@ function transformApiSessions(apiSessions: any[]): SessionRecord[] {
       dayLabel,
       sessionStatus,
     };
-    
+
     if (!dayMap.has(dateStr)) {
       dayMap.set(dateStr, []);
     }
@@ -161,8 +190,8 @@ function transformApiSessions(apiSessions: any[]): SessionRecord[] {
       result.push(session);
     });
   });
-  
-  return result;
+
+  return { sessions: result, missed: Array.from(missedByDate.values()) };
 }
 
 // Keep MOCK_SESSIONS as fallback for development
@@ -318,6 +347,7 @@ function SessionCard({ time, sessionNum, sessionsPerDay, achievedFlexion, target
 export default function HistoryScreen() {
   const auth = useAuth();
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
+  const [missed, setMissed] = useState<MissedRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedPeriod, setSelectedPeriod] = useState<Period>('7d');
@@ -328,6 +358,7 @@ export default function HistoryScreen() {
       // If developer explicitly requests mock data, skip API and use local mock.
       if (FORCE_MOCK) {
         setSessions(MOCK_SESSIONS);
+        setMissed([]);
         setIsLoading(false);
         return;
       }
@@ -344,17 +375,20 @@ export default function HistoryScreen() {
         const response = await getPatientSessions(auth.patientId);
         if (response.success && response.data) {
           const transformed = transformApiSessions(response.data);
-          setSessions(transformed);
+          setSessions(transformed.sessions);
+          setMissed(transformed.missed);
         } else {
           setError(response.error || 'Failed to fetch sessions');
           // Fall back to mock data if fetch fails
           setSessions(MOCK_SESSIONS);
+          setMissed([]);
         }
       } catch (err) {
         console.error('Error loading sessions:', err);
         setError('Failed to load session history');
         // Fall back to mock data
         setSessions(MOCK_SESSIONS);
+        setMissed([]);
       } finally {
         setIsLoading(false);
       }
@@ -371,7 +405,29 @@ export default function HistoryScreen() {
     const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
     return base.filter((s) => s.ts >= cutoff);
   }, [isLoading, sessions, selectedPeriod]);
+
+  const displayMissed = useMemo(() => {
+    if (isLoading) return [];
+    if (selectedPeriod === 'all') return missed;
+    const days = selectedPeriod === '7d' ? 7 : 30;
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+    return missed.filter((m) => m.ts >= cutoff);
+  }, [isLoading, missed, selectedPeriod]);
+
   const dayGroups = useMemo(() => groupByDay(displaySessions), [displaySessions]);
+
+  // Build a lookup of missed by date so session-day rows can show "ยังขาดอีก N ครั้ง"
+  const missedByDate = useMemo(() => {
+    const m = new Map<string, MissedRecord>();
+    displayMissed.forEach((r) => m.set(r.date, r));
+    return m;
+  }, [displayMissed]);
+
+  // Missed-only days (no session on that date at all)
+  const missedOnlyDays = useMemo(() => {
+    const sessionDates = new Set(dayGroups.map((g) => g.date));
+    return displayMissed.filter((m) => !sessionDates.has(m.date));
+  }, [dayGroups, displayMissed]);
 
   const Y_FLOOR = 50;
   const Y_CEILING = 130;
@@ -481,8 +537,10 @@ export default function HistoryScreen() {
 
         {dayGroups.map((group) => {
           const completed = group.sessions.length;
-          const perDay = group.sessions[0].sessionsPerDay;
+          const missedForDay = missedByDate.get(group.date);
+          const perDay = missedForDay?.expectedSessions ?? group.sessions[0].sessionsPerDay;
           const allDone = completed >= perDay;
+          const remaining = Math.max(0, perDay - completed);
           return (
             <View key={group.date} style={styles.dayGroup}>
               {/* Day header */}
@@ -526,9 +584,38 @@ export default function HistoryScreen() {
                   sessionStatus={session.sessionStatus}
                 />
               ))}
+              {missedForDay && remaining > 0 && (
+                <Text style={styles.missedInlineNote}>
+                  ยังขาดอีก {remaining} ครั้ง
+                </Text>
+              )}
             </View>
           );
         })}
+
+        {/* Missed-only days (no session performed at all) */}
+        {missedOnlyDays.map((m) => (
+          <View key={m.id} style={styles.dayGroup}>
+            <View style={styles.dayHeader}>
+              <View style={styles.dayHeaderLeft}>
+                <Ionicons name="calendar-outline" size={15} color={DSColors.text.secondary} />
+                <Text style={styles.dayHeaderDate}>{m.date}</Text>
+              </View>
+              <View style={styles.dayHeaderRight}>
+                {Array.from({ length: m.expectedSessions }, (_, i) => (
+                  <View key={i} style={[styles.dayDot, styles.dayDotMissed]} />
+                ))}
+                <Text style={styles.dayHeaderCount}>
+                  0/{m.expectedSessions}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.missedCard}>
+              <Ionicons name="close-circle-outline" size={18} color={DSColors.danger} />
+              <Text style={styles.missedCardText}>ไม่ได้ทำตามแผน</Text>
+            </View>
+          </View>
+        ))}
 
         <View style={styles.bottomSpacer} />
       </ScrollView>
@@ -716,6 +803,32 @@ const styles = StyleSheet.create({
     backgroundColor: DSColors.borderLight,
     borderWidth: 1,
     borderColor: DSColors.border,
+  },
+  dayDotMissed: {
+    backgroundColor: DSColors.danger,
+    opacity: 0.7,
+  },
+  missedInlineNote: {
+    ...DSTypography.caption,
+    color: DSColors.danger,
+    marginTop: 8,
+    marginLeft: 4,
+  },
+  missedCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    backgroundColor: DSColors.surface,
+    borderRadius: DSShape.radiusCard,
+    borderWidth: 1,
+    borderColor: DSColors.borderLight,
+    marginTop: 8,
+  },
+  missedCardText: {
+    ...DSTypography.body,
+    color: DSColors.text.secondary,
   },
   dayHeaderCount: {
     fontSize: 12,

@@ -19,7 +19,7 @@ export const API_BASE =
   (Platform.OS === 'android' ? 'http://10.0.2.2:8080' : 'http://localhost:8080');
 
 type FetchOptions = {
-  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: unknown;
   headers?: Record<string, string>;
 };
@@ -174,6 +174,20 @@ export async function updatePatient(
 }
 
 /**
+ * Deactivate (soft-delete) a treatment plan for a patient (doctor only).
+ * Sets plan status to "inactive" — preserves the row and all session FK references.
+ */
+export async function deactivatePlan(
+  authToken: string,
+  patientId: number
+): Promise<ApiResponse<TreatmentPlanResponse>> {
+  return apiCall<TreatmentPlanResponse>(`/api/patients/${patientId}/preset/status`, {
+    method: 'PATCH',
+    body: { status: 'INACTIVE' },
+  }, authToken);
+}
+
+/**
  * Delete treatment plan for a patient (doctor only)
  */
 export async function deleteTreatmentPlan(
@@ -261,6 +275,10 @@ export interface TreatmentPlanResponse {
   targetForceN?: number | null;
   forceLevel?: number;
   status?: string;
+  startDate?: string;
+  endDate?: string;
+  sessionsPerDay?: number;
+  daysOfWeek?: number[]; // 0=Sunday..6=Saturday
 }
 
 /**
@@ -294,7 +312,17 @@ export interface SessionSubmitPayload {
   sessionDate?: string;
 }
 
-export interface SessionResponse {
+export interface PlanSummary {
+  id: number;
+  targetFlexion: number;
+  targetExtension?: number;
+  durationMinutes?: number;
+  status?: string;
+  createdAt?: string;
+}
+
+export interface SessionEntry {
+  kind: 'session';
   id: number;
   patientId: number;
   planId: number;
@@ -305,16 +333,23 @@ export interface SessionResponse {
   actualForceUsed?: number | null;
   actualMaxForceN?: number | null;
   sessionDate: string;
+  status?: 'SUCCESS' | 'CONTINUE' | 'FAILED';
   sessionStatus?: 'SUCCESS' | 'CONTINUE' | 'FAILED';
-  plan?: {
-    id: number;
-    targetFlexion: number;
-    targetExtension?: number;
-    durationMinutes?: number;
-    status?: string;
-    createdAt?: string;
-  };
+  plan?: PlanSummary;
 }
+
+export interface MissedEntry {
+  kind: 'missed';
+  patientId: number;
+  planId: number;
+  sessionDate: string;
+  plan?: PlanSummary;
+  sessionStatus: 'MISSED';
+  expectedSessions: number;
+  completedSessions: number;
+}
+
+export type SessionResponse = SessionEntry | MissedEntry;
 
 /**
  * Submit a completed therapy session

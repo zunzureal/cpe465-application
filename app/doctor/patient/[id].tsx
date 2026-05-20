@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { View, TextInput, Switch, StyleSheet, Pressable, Text, TouchableOpacity, useWindowDimensions, Modal, ScrollView, Platform, Dimensions } from 'react-native';
+import { View, TextInput, Switch, StyleSheet, Pressable, Text, TouchableOpacity, useWindowDimensions, Modal, ScrollView, Platform, Dimensions, Alert, ActivityIndicator } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { LineChart } from 'react-native-chart-kit';
 import Svg, { Circle, Defs, LinearGradient, Line, Path, Stop, Text as SvgText } from 'react-native-svg';
 import { useLocalSearchParams } from 'expo-router';
 import { DSColors, DSLayout, DSShape, DSShadowSoft, DSTypography } from '@/constants/design-system';
 import { useAuth } from '@/contexts/AuthContext';
-import { putPatientPreset, getDoctorPatient, getPatientPreset, getPatientSessions, deleteTreatmentPlan } from '@/services/apiClient';
+import { putPatientPreset, getDoctorPatient, getPatientPreset, getPatientSessions, deactivatePlan, type SessionResponse } from '@/services/apiClient';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import DateTimePicker, { useDefaultStyles, type DateType } from 'react-native-calendars-datepicker';
@@ -167,15 +168,13 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
   const [targetExtension, setTargetExtension] = useState<string>('0');
   const [speedLevel, setSpeedLevel] = useState<string>('5');
   const [durationMinutes, setDurationMinutes] = useState<string>('10');
-  const [forceLevel, setForceLevel] = useState<string>('1');
   const [targetForceN, setTargetForceN] = useState<string>('70');
   const [useWarmup, setUseWarmup] = useState<boolean>(true);
-  const [sessions, setSessions] = useState<any[]>([]);
+  const [sessions, setSessions] = useState<SessionResponse[]>([]);
   const [showPlanModal, setShowPlanModal] = useState(false);
   const [existingPlan, setExistingPlan] = useState<any>(null);
-  const [isEditingPlan, setIsEditingPlan] = useState(false);
   const [isDeletingPlan, setIsDeletingPlan] = useState(false);
-  const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
+  const [confirmDeleteVisible, setConfirmDeleteVisible] = useState(false);
 
   // Compute which weekdays are present in the selected plan range (0=Sun..6=Sat)
   function getAllowedWeekdays(start: string, end: string) {
@@ -218,7 +217,7 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
       if (Number.isNaN(patientId)) return;
       const presetRes = await getPatientPreset(patientId);
       if (presetRes.success && presetRes.data) {
-        const p = presetRes.data;
+        const p = presetRes.data as any;
         setExistingPlan(p);
         setTargetFlexion(clampNumber(String(p.targetFlexion ?? 120), REALISTIC_LIMITS.flexion.min, REALISTIC_LIMITS.flexion.max));
         setTargetExtension(clampNumber(String(p.targetExtension ?? 0), REALISTIC_LIMITS.extension.min, REALISTIC_LIMITS.extension.max));
@@ -226,14 +225,34 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
         setDurationMinutes(String(p.durationMinutes ?? 10));
         setUseWarmup(Boolean(p.useWarmup ?? true));
         setTargetForceN(String(p.targetForceN ?? 70));
-        setForceLevel(clampNumber(String(p.forceLevel ?? 1), REALISTIC_LIMITS.forceLevel.min, REALISTIC_LIMITS.forceLevel.max));
+
+        // Scheduling fields — convert ISO date to YYYY-MM-DD using local parts
+        const toIsoDate = (s?: string) => {
+          if (!s) return '';
+          const d = new Date(s);
+          if (Number.isNaN(d.getTime())) return '';
+          const y = d.getFullYear();
+          const m = String(d.getMonth() + 1).padStart(2, '0');
+          const day = String(d.getDate()).padStart(2, '0');
+          return `${y}-${m}-${day}`;
+        };
+        setPlanStart(toIsoDate(p.startDate));
+        setPlanEnd(toIsoDate(p.endDate));
+        setSessionsPerDay(String(p.sessionsPerDay ?? 1));
+        if (Array.isArray(p.daysOfWeek)) {
+          const next = [false, false, false, false, false, false, false];
+          (p.daysOfWeek as number[]).forEach((idx) => {
+            if (idx >= 0 && idx <= 6) next[idx] = true;
+          });
+          setDaysOfWeek(next);
+        }
       } else {
         setExistingPlan(null);
       }
 
       const sessRes = await getPatientSessions(patientId, { limit: 20 });
       if (sessRes.success && Array.isArray(sessRes.data)) {
-        setSessions(sessRes.data as any[]);
+        setSessions(sessRes.data);
       }
     }
     fetchPresetAndSessions();
@@ -241,7 +260,7 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
 
   async function handleSave() {
     if (!authToken) {
-      alert('ไม่พบสิทธิ์การใช้งาน กรุณาเข้าสู่ระบบใหม่');
+      Alert.alert('เข้าสู่ระบบใหม่', 'ไม่พบสิทธิ์การใช้งาน กรุณาเข้าสู่ระบบใหม่');
       return;
     }
     setIsSaving(true);
@@ -268,8 +287,8 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
         }
       }
       const sessionsNum = Number(sessionsPerDay) || 0;
-      if (sessionsPerDay && (Number.isNaN(sessionsNum) || sessionsNum <= 0)) {
-        setPlanError('Sessions per day must be a positive number');
+      if (sessionsPerDay && (Number.isNaN(sessionsNum) || sessionsNum <= 0 || sessionsNum > 3)) {
+        setPlanError('Sessions per day must be between 1 and 3');
         setIsSaving(false);
         return;
       }
@@ -295,13 +314,6 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
         return;
       }
 
-      const forceLevelValue = Number(forceLevel);
-      if (Number.isNaN(forceLevelValue) || forceLevelValue < REALISTIC_LIMITS.forceLevel.min || forceLevelValue > REALISTIC_LIMITS.forceLevel.max) {
-        setPlanError('Force Level must be between 1 and 10');
-        setIsSaving(false);
-        return;
-      }
-
       setPlanError(null);
       const days = daysOfWeek.reduce<number[]>((acc, v, i) => (v ? acc.concat(i) : acc), []);
       const payload: any = {
@@ -311,7 +323,9 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
         duration: Number(durationMinutes) || 10,
         warmUp: Boolean(useWarmup),
         targetForceN: targetForceN ? Number(targetForceN) : null,
-        forceLevel: forceLevelValue,
+        // forceLevel is the patient-side scaling ceiling. Doctor only sets targetForceN;
+        // we always send 10 so the patient app interprets targetForceN as Level 10.
+        forceLevel: 10,
         startDate: planStart || undefined,
         endDate: planEnd || undefined,
         sessionsPerDay: Number(sessionsPerDay) || 1,
@@ -320,7 +334,7 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
 
       const res = await putPatientPreset(authToken!, patientId, payload);
       if (!res.success) {
-        alert(res.error || 'ไม่สามารถบันทึกแผนได้');
+        Alert.alert('บันทึกแผนการรักษาไม่สำเร็จ', res.error || 'ไม่สามารถบันทึกแผนการรักษาได้');
         return;
       }
 
@@ -328,12 +342,41 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
       const sessRes = await getPatientSessions(patientId, { limit: 20 });
       if (sessRes.success && Array.isArray(sessRes.data)) setSessions(sessRes.data as any[]);
 
-      alert('บันทึกแผนสำเร็จ');
+      setExistingPlan(res.data ?? true);
+      setShowPlanModal(false);
+      Alert.alert('บันทึกแผนการรักษา', 'บันทึกแผนการรักษาเรียบร้อย');
     } catch (err) {
       console.error(err);
-      alert('เกิดข้อผิดพลาดขณะบันทึกแผน');
+      Alert.alert('บันทึกแผนการรักษาไม่สำเร็จ', 'เกิดข้อผิดพลาดขณะบันทึกแผนการรักษา');
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  function handleDeletePlan() {
+    setConfirmDeleteVisible(true);
+  }
+
+  async function confirmDeactivatePlan() {
+    if (!authToken) return;
+    setIsDeletingPlan(true);
+    const res = await deactivatePlan(authToken, patientId);
+    setIsDeletingPlan(false);
+    setConfirmDeleteVisible(false);
+    if (res.success) {
+      setExistingPlan(null);
+      setPlanStart('');
+      setPlanEnd('');
+      setSessionsPerDay('1');
+      setDaysOfWeek([false, false, false, false, false, false, false]);
+      setTargetFlexion('120');
+      setTargetExtension('0');
+      setSpeedLevel('5');
+      setDurationMinutes('10');
+      setTargetForceN('70');
+      setUseWarmup(true);
+    } else {
+      Alert.alert('หยุดแผนการรักษาไม่สำเร็จ', res.error || 'ไม่สามารถหยุดแผนการรักษาได้');
     }
   }
 
@@ -402,7 +445,7 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
               startDate={rangeStart as DateType}
               endDate={rangeEnd as DateType}
               showOutsideDays
-              onChange={({ startDate: nextStartDate, endDate: nextEndDate }) => {
+              onChange={({ startDate: nextStartDate, endDate: nextEndDate }: { startDate: DateType; endDate: DateType }) => {
                 // Debug log to inspect raw picker values and types
                 try {
                   // eslint-disable-next-line no-console
@@ -464,23 +507,11 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
     return `${startDate} → ${endDate}`;
   }
 
-  const body = (
-    <View style={[styles.container, effectiveEmbedded && styles.embeddedContainer, styles.bodyContainer]}>
-      <View style={styles.headerRow}>
-        <ThemedText type="title" style={styles.heading}>{'จัดการแผนผู้ป่วย #'}{patientId}</ThemedText>
-        {onClose && (
-          <Pressable onPress={onClose} style={styles.closeButton}>
-            <Text style={styles.closeButtonText}>ปิด</Text>
-          </Pressable>
-        )}
-      </View>
-      {patientName && <ThemedText type="default" style={styles.meta}>ชื่อ: {patientName}</ThemedText>}
-      {patientHn && <ThemedText type="default" style={styles.meta}>HN: {patientHn}</ThemedText>}
-
-      <View style={{ height: 8 }} />
-      {/* <ThemedText type="subtitle" style={{ marginBottom: 8, color: DSColors.text.primary }}>Weekly Plan</ThemedText> */}
+  // ─── Plan Form (shared between inline modal and main body) ──────────────
+  const planFormContent = (
+    <>
       <View style={{ marginBottom: 8 }}>
-        <Text>Plan range</Text>
+        <Text style={styles.fieldLabel}>Plan range</Text>
         <Pressable
           onPress={() => setShowRangePicker(true)}
           style={[styles.input, { justifyContent: 'center', minHeight: 48 }]}
@@ -491,13 +522,25 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
         </Pressable>
       </View>
 
-      <View style={{ flexDirection: isNarrow ? 'column' : 'row', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+      <View style={{ flexDirection: isNarrow ? 'column' : 'row', gap: 8, alignItems: 'flex-start', marginBottom: 12 }}>
         <View style={isNarrow ? { width: '100%' } : { width: 160 }}>
-          <Text>Sessions / day</Text>
-          <TextInput value={sessionsPerDay} onChangeText={(t) => { setSessionsPerDay(t); setPlanError(null); }} style={styles.input} keyboardType="numeric" />
+          <Text style={styles.fieldLabel}>Sessions / day</Text>
+          <TextInput
+            value={sessionsPerDay}
+            onChangeText={(t) => {
+              const digits = t.replace(/\D/g, '').slice(0, 1);
+              const n = Number(digits);
+              const clamped = digits === '' ? '' : String(Math.min(3, Math.max(1, n)));
+              setSessionsPerDay(clamped);
+              setPlanError(null);
+            }}
+            style={styles.input}
+            keyboardType="numeric"
+            maxLength={1}
+          />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={{ marginBottom: 6 }}>Days of week</Text>
+          <Text style={[styles.fieldLabel, { marginBottom: 6 }]}>Days of week</Text>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
             {['Su','Mo','Tu','We','Th','Fr','Sa'].map((label, idx) => {
               const allowed = getAllowedWeekdays(planStart, planEnd)[idx];
@@ -506,21 +549,16 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
                 <Pressable
                   key={label}
                   onPress={() => {
-                    if (!allowed) return; // disable toggling if not in range
+                    if (!allowed) return;
                     const copy = [...daysOfWeek];
                     copy[idx] = !copy[idx];
                     setDaysOfWeek(copy);
                     setPlanError(null);
                   }}
                   disabled={!allowed}
-                  style={[
-                    styles.weekdayChip,
-                    isActive && styles.weekdayChipActive,
-                    !allowed && styles.weekdayChipDisabled,
-                    { marginBottom: 6 },
-                  ]}
+                  style={[styles.weekdayChip, isActive && styles.weekdayChipActive, !allowed && styles.weekdayChipDisabled, { marginBottom: 6 }]}
                 >
-                  <Text style={[{ fontWeight: '600' }, isActive ? { color: DSColors.text.inverse } : !allowed ? { color: DSColors.text.muted } : { color: DSColors.text.primary }]}>
+                  <Text style={[{ fontWeight: '600' }, isActive ? { color: DSColors.text.inverse } : !allowed ? { color: DSColors.text.secondary } : { color: DSColors.text.primary }]}>
                     {label}
                   </Text>
                 </Pressable>
@@ -529,6 +567,179 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
           </View>
         </View>
       </View>
+
+      <Text style={{ ...DSTypography.caption, color: DSColors.text.secondary, marginBottom: 6 }}>PRESCRIPTION (PHASE 1)</Text>
+      <View style={{ flexDirection: isNarrow ? 'column' : 'row', gap: 8, marginBottom: 8 }}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.fieldLabel}>Target Flexion (°)</Text>
+          <TextInput value={targetFlexion} onChangeText={(v) => setTargetFlexion(clampNumber(v, REALISTIC_LIMITS.flexion.min, REALISTIC_LIMITS.flexion.max))} style={styles.input} keyboardType="numeric" maxLength={3} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.fieldLabel}>Target Extension (°)</Text>
+          <TextInput value={targetExtension} onChangeText={(v) => setTargetExtension(clampNumber(v, REALISTIC_LIMITS.extension.min, REALISTIC_LIMITS.extension.max))} style={styles.input} keyboardType="numeric" maxLength={4} />
+        </View>
+      </View>
+
+      <View style={{ flexDirection: isNarrow ? 'column' : 'row', gap: 8, marginBottom: 8 }}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.fieldLabel}>Speed (1–10)</Text>
+          <TextInput value={speedLevel} onChangeText={(v) => setSpeedLevel(clampNumber(v, REALISTIC_LIMITS.speed.min, REALISTIC_LIMITS.speed.max))} style={styles.input} keyboardType="numeric" maxLength={2} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.fieldLabel}>Duration (min)</Text>
+          <TextInput value={durationMinutes} onChangeText={setDurationMinutes} style={styles.input} keyboardType="numeric" />
+        </View>
+      </View>
+
+      <Text style={styles.fieldLabel}>Max Resistance Force (N) — เพดานสูงสุด (= Level 10)</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+        <TextInput value={targetForceN} onChangeText={setTargetForceN} style={[styles.input, { flex: 1 }]} keyboardType="numeric" />
+      </View>
+      <Text style={{ ...DSTypography.caption, color: DSColors.text.secondary, marginBottom: 12 }}>
+        ผู้ป่วยสามารถปรับเลเวลแรงได้ 1–10 ในระหว่างฝึก โดยแรงต่อเลเวล = {targetForceN ? (Number(targetForceN) / 10).toFixed(1) : '-'} N
+      </Text>
+
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
+        <Switch value={useWarmup} onValueChange={setUseWarmup} />
+        <Text style={{ marginLeft: 8 }}>Warm-up mode</Text>
+      </View>
+
+      {planError && <Text style={{ color: DSColors.danger, marginBottom: 8 }}>{planError}</Text>}
+    </>
+  );
+
+  const body = (
+    <View style={[styles.container, effectiveEmbedded && styles.embeddedContainer, styles.bodyContainer]}>
+      <View style={styles.patientHeaderCard}>
+        <View style={styles.patientHeaderTopRow}>
+          <View style={styles.patientHeaderTitleRow}>
+            <View style={styles.patientHeaderIconWrap}>
+              <Ionicons name="person-circle" size={28} color={DSColors.primary} />
+            </View>
+            <ThemedText type="title" style={styles.heading}>จัดการผู้ป่วย</ThemedText>
+          </View>
+          {onClose && (
+            <Pressable onPress={onClose} style={styles.closeButton}>
+              <Text style={styles.closeButtonText}>ปิด</Text>
+            </Pressable>
+          )}
+        </View>
+
+        {(patientName || patientHn) && (
+          <View style={styles.metaInline}>
+            {patientName && (
+              <View style={styles.metaRow}>
+                <Ionicons name="person-outline" size={16} color={DSColors.primary} />
+                <Text style={styles.metaText}>{patientName}</Text>
+              </View>
+            )}
+            {patientHn && (
+              <View style={styles.metaRow}>
+                <Ionicons name="card-outline" size={16} color={DSColors.primary} />
+                <Text style={styles.metaText}>{patientHn}</Text>
+              </View>
+            )}
+          </View>
+        )}
+      </View>
+
+      <View style={{ height: 16 }} />
+
+      {/* ── Plan Section ── */}
+
+      {existingPlan ? (
+        // ── Plan Summary Card ──
+        <View style={styles.planCard}>
+          <View style={styles.planCardHeader}>
+            <Text style={styles.planCardTitle}>แผนการรักษาปัจจุบัน</Text>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <Pressable onPress={() => { setPlanError(null); setShowPlanModal(true); }} style={styles.editChip}>
+                <Text style={styles.editChipText}>แก้ไข</Text>
+              </Pressable>
+              <Pressable onPress={handleDeletePlan} style={styles.deactivateChip} disabled={isDeletingPlan}>
+                {isDeletingPlan
+                  ? <ActivityIndicator size="small" color="#FFFFFF" />
+                  : <Text style={styles.deactivateChipText}>ปิดใช้งาน</Text>}
+              </Pressable>
+            </View>
+          </View>
+
+          {(planStart || planEnd) && (
+            <View style={styles.planCardRow}>
+              <View style={styles.planCardItem}>
+                <Text style={styles.planCardLabel}>ช่วงวันที่</Text>
+                <Text style={styles.planCardValue}>{planStart || '-'} → {planEnd || '-'}</Text>
+              </View>
+              <View style={styles.planCardItem}>
+                <Text style={styles.planCardLabel}>Session / วัน</Text>
+                <Text style={styles.planCardValue}>{sessionsPerDay}</Text>
+              </View>
+            </View>
+          )}
+
+          <View style={styles.planCardDivider} />
+
+          <View style={styles.planCardRow}>
+            <View style={styles.planCardItem}>
+              <Text style={styles.planCardLabel}>Flexion</Text>
+              <Text style={styles.planCardValue}>{targetFlexion}°</Text>
+            </View>
+            <View style={styles.planCardItem}>
+              <Text style={styles.planCardLabel}>Extension</Text>
+              <Text style={styles.planCardValue}>{targetExtension}°</Text>
+            </View>
+            <View style={styles.planCardItem}>
+              <Text style={styles.planCardLabel}>Duration</Text>
+              <Text style={styles.planCardValue}>{durationMinutes} นาที</Text>
+            </View>
+            <View style={styles.planCardItem}>
+              <Text style={styles.planCardLabel}>Speed</Text>
+              <Text style={styles.planCardValue}>Lv.{speedLevel}</Text>
+            </View>
+            <View style={styles.planCardItem}>
+              <Text style={styles.planCardLabel}>Force</Text>
+              <Text style={styles.planCardValue}>{targetForceN} N</Text>
+            </View>
+          </View>
+        </View>
+      ) : (
+        // ── No Plan: Create Button ──
+        <Pressable onPress={() => { setPlanError(null); setShowPlanModal(true); }} style={styles.createPlanBtn}>
+          <Text style={styles.createPlanBtnText}>+ สร้างแผนการรักษา</Text>
+        </Pressable>
+      )}
+
+      {/* ── Plan Form Modal ── */}
+      <Modal visible={showPlanModal} transparent animationType="slide" onRequestClose={() => setShowPlanModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>{existingPlan ? 'ปรับแผนการรักษา' : 'กำหนดแผนการรักษา'}</Text>
+              <Pressable onPress={() => setShowPlanModal(false)} style={{ padding: 8 }}>
+                <Text style={{ fontSize: 18, color: DSColors.text.secondary, fontWeight: '600' }}>✕</Text>
+              </Pressable>
+            </View>
+
+            <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 20, paddingBottom: 8 }} keyboardShouldPersistTaps="handled">
+              {planFormContent}
+            </ScrollView>
+
+            <View style={styles.modalFooter}>
+              <Pressable onPress={() => setShowPlanModal(false)} style={[styles.outlineButton, { flex: 1 }]}>
+                <Text style={[styles.outlineButtonText, { textAlign: 'center' }]}>ยกเลิก</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => { if (!isSaving) handleSave(); }}
+                style={[styles.primaryButton, { flex: 2, opacity: isSaving ? 0.6 : 1 }]}
+              >
+                <Text style={[styles.primaryButtonText, { textAlign: 'center' }]}>
+                  {isSaving ? 'กำลังบันทึก...' : 'Save & Send to Machine'}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <DateRangePickerModal
         visible={showRangePicker}
@@ -539,84 +750,61 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
           setPlanStart(startDate);
           setPlanEnd(endDate);
           setPlanError(null);
-          if (startDate || endDate) {
-            setShowRangePicker(false);
-          }
+          if (startDate || endDate) setShowRangePicker(false);
         }}
       />
 
-      {planError && <ThemedText type="default" style={{ color: DSColors.danger, marginBottom: 8 }}>{planError}</ThemedText>}
+      {/* Confirm Deactivate Plan Modal */}
+      <Modal
+        visible={confirmDeleteVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setConfirmDeleteVisible(false)}
+      >
+        <Pressable style={styles.confirmOverlay} onPress={() => setConfirmDeleteVisible(false)}>
+          <View style={styles.confirmCard}>
+            <Text style={styles.confirmTitle}>หยุดแผนการรักษา</Text>
+            <Text style={styles.confirmMessage}>
+              ต้องการหยุดแผนการรักษานี้ใช่ไหม?{'\n'}ข้อมูล session เดิมจะยังคงอยู่ครบถ้วน
+            </Text>
+            <View style={styles.confirmActions}>
+              <Pressable
+                onPress={() => setConfirmDeleteVisible(false)}
+                style={[styles.outlineButton, { flex: 1, marginRight: 0 }]}
+                disabled={isDeletingPlan}
+              >
+                <Text style={[styles.outlineButtonText, { textAlign: 'center' }]}>ยกเลิก</Text>
+              </Pressable>
+              <Pressable
+                onPress={confirmDeactivatePlan}
+                style={[styles.primaryButton, { flex: 1 }, isDeletingPlan && { opacity: 0.6 }]}
+                disabled={isDeletingPlan}
+              >
+                <Text style={[styles.primaryButtonText, { textAlign: 'center' }]}>
+                  {isDeletingPlan ? 'กำลังหยุด...' : 'หยุดแผน'}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </Pressable>
+      </Modal>
 
-      <Text style={{ ...DSTypography.caption, marginBottom: 6 }}>PRESCRIPTION (PHASE 1)</Text>
-      <View style={{ flexDirection: isNarrow ? 'column' : 'row', gap: 8, marginBottom: 8 }}>
-        <View style={{ flex: 1 }}>
-          <Text>Target Flexion (°)</Text>
-          <TextInput
-            value={targetFlexion}
-            onChangeText={(value) => setTargetFlexion(clampNumber(value, REALISTIC_LIMITS.flexion.min, REALISTIC_LIMITS.flexion.max))}
-            style={styles.input}
-            keyboardType="numeric"
-            maxLength={3}
-          />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text>Target Extension (°)</Text>
-          <TextInput
-            value={targetExtension}
-            onChangeText={(value) => setTargetExtension(clampNumber(value, REALISTIC_LIMITS.extension.min, REALISTIC_LIMITS.extension.max))}
-            style={styles.input}
-            keyboardType="numeric"
-            maxLength={4}
-          />
-        </View>
-      </View>
+      <View style={{ height: 24 }} />
 
-      <View style={{ flexDirection: isNarrow ? 'column' : 'row', gap: 8, marginBottom: 8 }}>
-        <View style={{ flex: 1 }}>
-          <Text>Speed (1–10)</Text>
-          <TextInput
-            value={speedLevel}
-            onChangeText={(value) => setSpeedLevel(clampNumber(value, REALISTIC_LIMITS.speed.min, REALISTIC_LIMITS.speed.max))}
-            style={styles.input}
-            keyboardType="numeric"
-            maxLength={2}
-          />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text>Duration (min)</Text>
-          <TextInput value={durationMinutes} onChangeText={setDurationMinutes} style={styles.input} keyboardType="numeric" />
-        </View>
-        <View style={isNarrow ? { width: '100%' } : { width: 120 }}>
-          <Text>Force Level (1–10)</Text>
-          <TextInput
-            value={forceLevel}
-            onChangeText={(value) => setForceLevel(clampNumber(value, REALISTIC_LIMITS.forceLevel.min, REALISTIC_LIMITS.forceLevel.max))}
-            style={styles.input}
-            keyboardType="numeric"
-            maxLength={2}
-          />
-        </View>
-      </View>
-
-      <Text style={{ marginBottom: 6 }}>Max Resistance Force (N)</Text>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <TextInput value={targetForceN} onChangeText={setTargetForceN} style={[styles.input, { flex: 1 }]} keyboardType="numeric" />
-        <Text style={{ width: 48 }}>{targetForceN} N</Text>
-      </View>
-
-      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
-        <Switch value={useWarmup} onValueChange={setUseWarmup} />
-        <Text style={{ marginLeft: 8 }}>Warm-up mode</Text>
-      </View>
-
-      <ThemedText type="default" style={styles.sectionLabel}>PROGRESS — TARGET VS ACTUAL FLEXION (LAST 7 SESSIONS)</ThemedText>
       <ThemedView style={[styles.chartCard, isNarrow ? styles.chartCardNarrow : {}, isAndroidTablet ? styles.chartCardTablet : {}]}>
-        {sessions.length > 0 ? (
+        <View style={styles.chartCardHeader}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.chartCardTitle}>ความคืบหน้าการรักษา</Text>
+            <Text style={styles.chartCardSubtitle}>Target vs Actual Flexion · 7 sessions ล่าสุด</Text>
+          </View>
+        </View>
+        {sessions.filter((s) => s.kind === 'session').length > 0 ? (
           (() => {
-            const sortedSessions = sessions.slice().sort((a, b) => new Date((a as any).sessionDate).getTime() - new Date((b as any).sessionDate).getTime());
+            const sessionEntries = sessions.filter((s): s is Extract<SessionResponse, { kind: 'session' }> => s.kind === 'session');
+            const sortedSessions = sessionEntries.slice().sort((a, b) => new Date(a.sessionDate).getTime() - new Date(b.sessionDate).getTime());
             const recent = sortedSessions.slice(-7);
-            const labels = recent.map((s) => new Date((s as any).sessionDate).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' }));
-            const actuals = recent.map((s) => Number((s as any).actualMaxFlexion) || 0);
+            const labels = recent.map((s) => new Date(s.sessionDate).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' }));
+            const actuals = recent.map((s) => Number(s.actualMaxFlexion) || 0);
             const target = recent.map(() => Number(targetFlexion) || 0);
             if (isAndroidTablet) {
               return <AndroidTabletProgressFallback sessions={recent} targetFlexion={targetFlexion} />;
@@ -624,9 +812,12 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
 
             const dataMax = Math.max(...actuals, ...target, 1);
             const dataMin = Math.max(0, Math.min(...actuals, ...target) - 5);
+            // Card has paddingHorizontal=12 (x2) + screen padding 20 (x2) + 1px border (x2)
+            // = ~66px of horizontal chrome to subtract before computing the chart width.
+            const cardChromeX = 66;
             const chartWidth = isCompactEmbedded
-              ? Math.max(260, Math.min(440, width - 24))
-              : Math.max(280, Math.min(900, width - (isNarrow ? 32 : 160)));
+              ? Math.max(260, Math.min(440, width - 24 - cardChromeX))
+              : Math.max(260, Math.min(900, width - (isNarrow ? 32 : 160) - cardChromeX));
             const chartHeight = isCompactEmbedded ? 168 : isNarrow ? 176 : 180;
             const paddingLeft = 34;
             const paddingRight = 18;
@@ -659,7 +850,7 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
             };
 
             const cfg = makeChartConfig(DSColors.text.secondary, DSColors.borderLight);
-            const usableWidth = Math.max(260, Math.min(chartWidth, width - (isNarrow ? 24 : 160)));
+            const usableWidth = Math.max(260, Math.min(chartWidth, width - (isNarrow ? 24 : 160) - cardChromeX));
 
             const chartRenderHeight = Math.max(160, chartHeight);
 
@@ -700,20 +891,87 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
         )}
       </ThemedView>
 
-      <ThemedText type="default" style={styles.sectionLabel}>SESSION HISTORY</ThemedText>
-      {sessions.length === 0 ? (
-        <ThemedText type="default" style={styles.empty}>ยังไม่มีประวัติการบำบัด</ThemedText>
-      ) : (
-        <View>
-          {sessions.slice().sort((a, b) => new Date((b as any).sessionDate).getTime() - new Date((a as any).sessionDate).getTime()).map((item) => (
-            <ThemedView key={String((item as any).id)} style={styles.sessionRow}>
-              <Text style={styles.sessionDate}>{new Date((item as any).sessionDate).toLocaleString()}</Text>
-              <Text style={styles.sessionText}>Actual Max Flexion: {(item as any).actualMaxFlexion}</Text>
-              <Text style={styles.sessionText}>Status: {(item as any).sessionStatus}</Text>
-            </ThemedView>
-          ))}
+      <ThemedView style={styles.historyCard}>
+        <View style={styles.historyCardHeader}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.historyCardTitle}>ประวัติการบำบัด</Text>
+            <Text style={styles.historyCardSubtitle}>Session History</Text>
+          </View>
+        </View>
+
+        {sessions.length === 0 ? (
+          <ThemedText type="default" style={styles.empty}>ยังไม่มีประวัติการบำบัด</ThemedText>
+        ) : (
+          <View>
+          {sessions.slice().sort((a, b) => new Date(b.sessionDate).getTime() - new Date(a.sessionDate).getTime()).map((item) => {
+            const sessionTarget = item.plan?.targetFlexion;
+            if (item.kind === 'missed') {
+              return (
+                <ThemedView
+                  key={`m-${item.planId}-${item.sessionDate}`}
+                  style={[styles.sessionRow, { opacity: 0.7 }]}
+                >
+                  <View style={styles.sessionItemRow}>
+                    <View style={styles.sessionItemLeft}>
+                      <Ionicons name="close-circle-outline" size={18} color={DSColors.danger} />
+                      <Text style={styles.sessionItemLabel}>ไม่ได้ทำตามแผน</Text>
+                    </View>
+                    <Text style={[styles.sessionItemValue, { color: DSColors.danger }]}>
+                      {item.completedSessions}/{item.expectedSessions}
+                    </Text>
+                  </View>
+                  <View style={styles.sessionItemRow}>
+                    <View style={styles.sessionItemLeft}>
+                      <Ionicons name="calendar-outline" size={18} color={DSColors.text.secondary} />
+                      <Text style={styles.sessionItemLabel}>วันที่</Text>
+                    </View>
+                    <Text style={styles.sessionItemValue}>{new Date(item.sessionDate).toLocaleDateString()}</Text>
+                  </View>
+                  <View style={[styles.sessionItemRow, { borderBottomWidth: 0 }]}>
+                    <View style={styles.sessionItemLeft}>
+                      <Ionicons name="flag-outline" size={18} color={TARGET_LINE_COLOR} />
+                      <Text style={styles.sessionItemLabel}>Target Flexion</Text>
+                    </View>
+                    <Text style={[styles.sessionItemValue, { color: TARGET_LINE_COLOR }]}>
+                      {sessionTarget != null ? `${sessionTarget}°` : '-'}
+                    </Text>
+                  </View>
+                </ThemedView>
+              );
+            }
+            return (
+              <ThemedView key={`s-${item.id}`} style={styles.sessionRow}>
+                <View style={styles.sessionItemRow}>
+                  <View style={styles.sessionItemLeft}>
+                    <Ionicons name="time-outline" size={18} color={DSColors.text.secondary} />
+                    <Text style={styles.sessionItemLabel}>เวลา</Text>
+                  </View>
+                  <Text style={styles.sessionItemValue}>{new Date(item.sessionDate).toLocaleString()}</Text>
+                </View>
+                <View style={styles.sessionItemRow}>
+                  <View style={styles.sessionItemLeft}>
+                    <Ionicons name="flag-outline" size={18} color={TARGET_LINE_COLOR} />
+                    <Text style={styles.sessionItemLabel}>Target Flexion</Text>
+                  </View>
+                  <Text style={[styles.sessionItemValue, { color: TARGET_LINE_COLOR }]}>
+                    {sessionTarget != null ? `${sessionTarget}°` : '-'}
+                  </Text>
+                </View>
+                <View style={[styles.sessionItemRow, { borderBottomWidth: 0 }]}>
+                  <View style={styles.sessionItemLeft}>
+                    <Ionicons name="trending-up" size={18} color={DSColors.primary} />
+                    <Text style={styles.sessionItemLabel}>Actual Max Flexion</Text>
+                  </View>
+                  <Text style={[styles.sessionItemValue, { color: DSColors.primary }]}>
+                    {item.actualMaxFlexion}°
+                  </Text>
+                </View>
+              </ThemedView>
+            );
+          })}
         </View>
       )}
+      </ThemedView>
     </View>
   );
 
@@ -730,18 +988,6 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
           {body}
         </ScrollView>
 
-        <View style={[styles.saveFooter, effectiveEmbedded && styles.saveFooterEmbedded]}>
-          <Pressable
-            onPress={() => { if (!isSaving) handleSave(); }}
-            style={({ pressed }) => [
-              styles.primaryButton,
-              styles.saveButton,
-              { opacity: isSaving ? 0.6 : pressed ? 0.85 : 1 },
-            ]}
-          >
-            <Text style={styles.primaryButtonText}>{isSaving ? 'กำลังบันทึก...' : 'Save & Send to Machine'}</Text>
-          </Pressable>
-        </View>
       </View>
     </SafeAreaView>
   );
@@ -764,6 +1010,35 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 8,
   },
+  patientHeaderCard: {
+    backgroundColor: DSColors.surface,
+    borderRadius: DSShape.radiusCard,
+    borderWidth: 1,
+    borderColor: DSColors.border,
+    padding: 16,
+    marginBottom: 16,
+    ...DSShadowSoft,
+  },
+  patientHeaderTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  patientHeaderTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+  },
+  patientHeaderIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: DSShape.radiusButton,
+    backgroundColor: DSColors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   closeButton: {
     borderWidth: 1,
     borderColor: DSColors.border,
@@ -781,16 +1056,171 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     color: DSColors.text.secondary,
   },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: DSShape.radiusButton,
+    borderWidth: 1,
+    borderColor: DSColors.primary + '30',
+    backgroundColor: DSColors.primaryLight,
+  },
+  metaInline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  metaText: {
+    ...DSTypography.captionBold,
+    color: DSColors.primaryDark,
+  },
   label: {
     ...DSTypography.caption,
     color: DSColors.text.secondary,
     marginBottom: 6,
+  },
+  fieldLabel: {
+    ...DSTypography.caption,
+    color: DSColors.text.secondary,
+    marginBottom: 4,
   },
   sectionLabel: {
     ...DSTypography.caption,
     color: DSColors.text.secondary,
     marginBottom: 8,
     marginTop: 4,
+    textTransform: 'uppercase' as const,
+  },
+  // Plan card
+  planCard: {
+    backgroundColor: DSColors.surface,
+    borderRadius: DSShape.radiusCard,
+    borderWidth: 1,
+    borderColor: DSColors.border,
+    padding: 16,
+    marginBottom: 4,
+    ...DSShadowSoft,
+  },
+  planCardHeader: {
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    alignItems: 'center' as const,
+    marginBottom: 12,
+  },
+  planCardTitle: {
+    ...DSTypography.bodyBold,
+    color: DSColors.text.primary,
+  },
+  editChip: {
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    borderRadius: DSShape.radiusButton,
+    backgroundColor: DSColors.warning,
+  },
+  editChipText: {
+    color: '#FFFFFF',
+    fontWeight: '700' as const,
+    fontSize: 13,
+  },
+  deleteChip: {
+    paddingVertical: 5,
+    paddingHorizontal: 12,
+    borderRadius: DSShape.radiusButton,
+    borderWidth: 1,
+    borderColor: DSColors.danger,
+    backgroundColor: DSColors.surface,
+    minWidth: 44,
+    alignItems: 'center' as const,
+  },
+  deleteChipText: {
+    color: DSColors.danger,
+    fontWeight: '600' as const,
+    fontSize: 13,
+  },
+  deactivateChip: {
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    borderRadius: DSShape.radiusButton,
+    backgroundColor: DSColors.danger,
+    minWidth: 44,
+    alignItems: 'center' as const,
+  },
+  deactivateChipText: {
+    color: '#FFFFFF',
+    fontWeight: '700' as const,
+    fontSize: 13,
+  },
+  planCardRow: {
+    flexDirection: 'row' as const,
+    flexWrap: 'wrap' as const,
+    gap: 12,
+    marginBottom: 8,
+  },
+  planCardItem: {
+    minWidth: 72,
+  },
+  planCardLabel: {
+    ...DSTypography.caption,
+    color: DSColors.text.secondary,
+    marginBottom: 2,
+  },
+  planCardValue: {
+    ...DSTypography.bodyBold,
+    color: DSColors.text.primary,
+  },
+  planCardDivider: {
+    height: 1,
+    backgroundColor: DSColors.borderLight,
+    marginVertical: 8,
+  },
+  // Create plan button
+  createPlanBtn: {
+    borderWidth: 1.5,
+    borderColor: DSColors.primary,
+    borderStyle: 'dashed' as const,
+    borderRadius: DSShape.radiusCard,
+    padding: 20,
+    alignItems: 'center' as const,
+    backgroundColor: DSColors.surface,
+  },
+  createPlanBtnText: {
+    color: DSColors.primary,
+    fontWeight: '700' as const,
+    fontSize: 16,
+  },
+  // Plan form modal — full screen
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: DSColors.background,
+  },
+  modalCard: {
+    flex: 1,
+    backgroundColor: DSColors.background,
+  },
+  modalHeader: {
+    flexDirection: 'row' as const,
+    justifyContent: 'space-between' as const,
+    alignItems: 'center' as const,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: DSColors.borderLight,
+  },
+  modalTitle: {
+    ...DSTypography.h3,
+    color: DSColors.text.primary,
+  },
+  modalFooter: {
+    flexDirection: 'row' as const,
+    gap: 10,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderTopWidth: 1,
+    borderTopColor: DSColors.borderLight,
+    backgroundColor: DSColors.background,
   },
   input: {
     borderWidth: 1,
@@ -812,7 +1242,55 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 12,
     paddingVertical: 10,
+    overflow: 'hidden',
     ...DSShadowSoft,
+  },
+  chartCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    alignSelf: 'stretch',
+    paddingHorizontal: 4,
+    paddingBottom: 12,
+    marginBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: DSColors.borderLight,
+  },
+  chartCardTitle: {
+    ...DSTypography.bodyBold,
+    color: DSColors.text.primary,
+  },
+  chartCardSubtitle: {
+    ...DSTypography.caption,
+    color: DSColors.text.secondary,
+    marginTop: 2,
+  },
+  historyCard: {
+    backgroundColor: DSColors.surface,
+    borderRadius: DSShape.radiusCard,
+    borderWidth: 1,
+    borderColor: DSColors.border,
+    padding: 16,
+    marginBottom: 16,
+    ...DSShadowSoft,
+  },
+  historyCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingBottom: 12,
+    marginBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: DSColors.borderLight,
+  },
+  historyCardTitle: {
+    ...DSTypography.bodyBold,
+    color: DSColors.text.primary,
+  },
+  historyCardSubtitle: {
+    ...DSTypography.caption,
+    color: DSColors.text.secondary,
+    marginTop: 2,
   },
   chartCardTablet: {
     borderRadius: 0,
@@ -995,6 +1473,29 @@ const styles = StyleSheet.create({
     ...DSTypography.body,
     color: DSColors.text.primary,
   },
+  sessionItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: DSColors.borderLight,
+  },
+  sessionItemLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+  },
+  sessionItemLabel: {
+    ...DSTypography.caption,
+    color: DSColors.text.secondary,
+  },
+  sessionItemValue: {
+    ...DSTypography.bodyBold,
+    color: DSColors.text.primary,
+    textAlign: 'right',
+  },
   primaryButton: {
     backgroundColor: DSColors.primary,
     paddingVertical: 10,
@@ -1003,7 +1504,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   primaryButtonText: {
-    color: DSColors.text.primary,
+    color: '#FFFFFF',
     fontWeight: '700',
   },
   outlineButtonText: {
@@ -1038,6 +1539,35 @@ const styles = StyleSheet.create({
   },
   embeddedScrollContainer: {
     justifyContent: 'flex-start',
+  },
+  // Confirm Deactivate Plan modal
+  confirmOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: DSLayout.screenPadding,
+  },
+  confirmCard: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: DSColors.surface,
+    borderRadius: DSShape.radiusCard,
+    padding: DSLayout.screenPadding,
+  },
+  confirmTitle: {
+    ...DSTypography.h3,
+    color: DSColors.text.primary,
+    marginBottom: 12,
+  },
+  confirmMessage: {
+    ...DSTypography.body,
+    color: DSColors.text.secondary,
+    marginBottom: 20,
+  },
+  confirmActions: {
+    flexDirection: 'row',
+    gap: 10,
   },
   saveFooter: {
     borderTopWidth: 1,
