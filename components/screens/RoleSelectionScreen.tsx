@@ -1,6 +1,6 @@
 /**
  * RoleSelectionScreen — Smart Rehab entry point.
- * Layout: idempotent Flexbox (row of equal-width cards, each card = row: icon | text | chevron).
+ * Layout: two equal-width cards always in a row (never stacked).
  */
 
 import { FontAwesome5, Ionicons } from '@expo/vector-icons';
@@ -30,9 +30,7 @@ export interface RoleSelectionScreenProps {
 
 const H_PAD = 16;
 const MAX_BLOCK = 720;
-const CARD_MARGIN = 6;
-const ICON_BOX = 64;
-const CHEVRON_SLOT = 28;
+const CARD_GAP = 12;
 const ACCENT_WIDTH = 8;
 
 const DOCTOR_WELL = '#E8EEF5';
@@ -40,26 +38,24 @@ const DOCTOR_ICON = '#154565';
 
 export function RoleSelectionScreen({ onSelect }: RoleSelectionScreenProps) {
   const { width } = useWindowDimensions();
-  const isPhone = width < 700;
-  const blockW = isPhone ? width - H_PAD * 2 : Math.min(MAX_BLOCK, width - H_PAD * 2);
+  const blockW = Math.min(MAX_BLOCK, width - H_PAD * 2);
 
   return (
     <SafeAreaView edges={['bottom']} style={styles.safe}>
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={[styles.scrollInner, isPhone && styles.scrollInnerPhone]}
+        contentContainerStyle={styles.scrollInner}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
         <View style={[styles.block, { width: blockW }]}>
-          <View style={[styles.header, isPhone && styles.headerPhone]}>
+          <View style={styles.header}>
             <Text style={styles.screenTitle}>กรุณาเลือกสถานะผู้ใช้งาน</Text>
             <Text style={styles.screenSubtitle}>Please select your role</Text>
           </View>
 
-          <View style={[styles.cardsRow, isPhone && styles.cardsRowPhone]}>
+          <View style={styles.cardsRow}>
             <RoleCard
-              isPhone={isPhone}
               variant="patient"
               titleTh="ผู้ป่วย"
               titleEn="Patient"
@@ -68,7 +64,6 @@ export function RoleSelectionScreen({ onSelect }: RoleSelectionScreenProps) {
               accessibilityLabel="เลือกสถานะผู้ป่วย"
             />
             <RoleCard
-              isPhone={isPhone}
               variant="doctor"
               titleTh="แพทย์ / นักกายภาพ"
               titleEn="Doctor / Physical Therapist"
@@ -88,7 +83,6 @@ export function RoleSelectionScreen({ onSelect }: RoleSelectionScreenProps) {
 }
 
 type RoleCardProps = {
-  isPhone: boolean;
   variant: 'patient' | 'doctor';
   titleTh: string;
   titleEn: string;
@@ -98,7 +92,6 @@ type RoleCardProps = {
 };
 
 function RoleCard({
-  isPhone,
   variant,
   titleTh,
   titleEn,
@@ -109,56 +102,60 @@ function RoleCard({
   const patient = variant === 'patient';
 
   return (
-    <View style={[styles.cardShell, isPhone && styles.cardShellPhone]}>
+    <View style={styles.cardShell}>
+      {/*
+        Pressable handles touch only (flex:1 to fill shell).
+        Layout lives in the inner View so flexDirection:'row' works
+        reliably on iOS native without Pressable interference.
+      */}
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={accessibilityLabel}
         onPress={onPress}
-        style={({ pressed }) => [
-          styles.card,
-          isPhone && styles.cardPhone,
-          pressed && styles.cardPressed,
-        ]}
+        style={styles.pressable}
       >
-        <View
-          style={[
-            styles.leftAccent,
-            patient ? styles.leftAccentPatient : styles.leftAccentDoctor,
-            isPhone && styles.leftAccentPhone,
-          ]}
-        />
-        <View
-          style={[
-            styles.iconBox,
-            isPhone && styles.iconBoxPhone,
-            patient ? styles.iconBoxPatient : styles.iconBoxDoctor,
-          ]}
-        >
-          {patient ? (
-            <FontAwesome5 name="user-injured" size={28} color={DSColors.primary} />
-          ) : (
-            <FontAwesome5 name="user-md" size={30} color={DOCTOR_ICON} />
-          )}
-        </View>
+        {({ pressed }) => (
+          <View style={[styles.card, pressed && styles.cardPressed]}>
+            <View
+              style={[
+                styles.leftAccent,
+                patient ? styles.leftAccentPatient : styles.leftAccentDoctor,
+              ]}
+            />
 
-        <View style={[styles.textCol, isPhone && styles.textColPhone]}>
-          <Text style={styles.cardTitle} numberOfLines={2}>
-            {titleTh}
-          </Text>
-          <Text
-            style={[styles.cardEn, patient ? styles.cardEnPatient : styles.cardEnDoctor]}
-            numberOfLines={2}
-          >
-            {titleEn}
-          </Text>
-          <Text style={styles.cardDesc} numberOfLines={2}>
-            {descriptionTh}
-          </Text>
-        </View>
+            <View
+              style={[
+                styles.iconBox,
+                patient ? styles.iconBoxPatient : styles.iconBoxDoctor,
+              ]}
+            >
+              {patient ? (
+                <FontAwesome5 name="user-injured" size={24} color={DSColors.primary} />
+              ) : (
+                <FontAwesome5 name="user-md" size={26} color={DOCTOR_ICON} />
+              )}
+            </View>
 
-        <View style={[styles.chevronBox, isPhone && styles.chevronBoxPhone]} pointerEvents="none">
-          <Ionicons name="chevron-forward" size={22} color={DSColors.secondaryLight} />
-        </View>
+            <View style={styles.textCol}>
+              <Text style={styles.cardTitle} numberOfLines={2}>
+                {titleTh}
+              </Text>
+              <Text
+                style={[styles.cardEn, patient ? styles.cardEnPatient : styles.cardEnDoctor]}
+                numberOfLines={1}
+              >
+                {titleEn}
+              </Text>
+              <Text style={styles.cardDesc} numberOfLines={2}>
+                {descriptionTh}
+              </Text>
+            </View>
+
+            <View style={styles.chevronBox} pointerEvents="none">
+              <Ionicons name="chevron-forward" size={18} color={DSColors.secondaryLight} />
+            </View>
+          </View>
+        )}
       </Pressable>
     </View>
   );
@@ -177,24 +174,17 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     width: '100%',
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: H_PAD,
-    paddingVertical: 20,
-  },
-  scrollInnerPhone: {
     justifyContent: 'flex-start',
-    paddingTop: 28,
-    paddingBottom: 28,
+    paddingHorizontal: H_PAD,
+    paddingTop: 48,
+    paddingBottom: 24,
   },
   block: {
     alignSelf: 'center',
   },
   header: {
     alignItems: 'center',
-    marginBottom: 24,
-  },
-  headerPhone: {
-    marginBottom: 18,
+    marginBottom: 128,
   },
   screenTitle: {
     ...DSTypography.h1,
@@ -209,19 +199,15 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 8,
   },
-  /** Two equal columns; spacing via horizontal margin (no `gap`). */
+  /** Always column — cards stack top to bottom. */
   cardsRow: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    width: '100%',
-  },
-  cardsRowPhone: {
     flexDirection: 'column',
+    width: '100%',
+    gap: CARD_GAP,
   },
   cardShell: {
     flex: 1,
     minWidth: 0,
-    marginHorizontal: CARD_MARGIN,
     borderRadius: DSShape.radiusCard,
     backgroundColor: DSColors.surface,
     ...(DSShadow as object),
@@ -230,52 +216,32 @@ const styles = StyleSheet.create({
       default: {},
     }),
   },
-  cardShellPhone: {
-    flex: 0,
-    marginHorizontal: 0,
-    marginBottom: 12,
-    width: '100%',
+  pressable: {
+    flex: 1,
+    borderRadius: DSShape.radiusCard,
   },
   card: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 112,
-    paddingVertical: 14,
-    paddingHorizontal: 12,
-    paddingLeft: ACCENT_WIDTH + 12,
+    minHeight: 100,
+    paddingVertical: 12,
+    paddingLeft: ACCENT_WIDTH + 8,
+    paddingRight: 8,
     borderRadius: DSShape.radiusCard,
     backgroundColor: DSColors.surface,
-    position: 'relative',
     overflow: 'hidden',
   },
-  cardPhone: {
-    flexDirection: 'column',
-    alignItems: 'flex-start',
-    justifyContent: 'flex-start',
-    minHeight: 0,
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-    paddingLeft: ACCENT_WIDTH + 16,
-  },
   cardPressed: {
-    opacity: 0.88,
+    opacity: 0.85,
   },
   iconBox: {
-    width: ICON_BOX,
-    height: ICON_BOX,
-    borderRadius: 16,
+    width: 48,
+    height: 48,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
-  },
-  iconBoxPhone: {
-    width: 56,
-    height: 56,
-    marginRight: 0,
-    marginTop: 12,
-    marginBottom: 12,
-    marginLeft: 20,
+    flexShrink: 0,
   },
   iconBoxPatient: {
     backgroundColor: DSColors.primaryLight,
@@ -287,56 +253,42 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(21, 69, 101, 0.2)',
   },
-  /** flexShrink + minWidth:0 so long EN titles don’t blow up row width. */
+  /** flex:1 + minWidth:0 so text never pushes the chevron off screen. */
   textCol: {
     flex: 1,
     minWidth: 0,
     justifyContent: 'center',
-  },
-  textColPhone: {
-    width: '100%',
-    flex: 0,
+    paddingHorizontal: 8,
   },
   cardTitle: {
     ...DSTypography.h3,
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
-    left: 26,
     color: DSColors.secondary,
   },
   cardEn: {
     ...DSTypography.captionBold,
-    fontSize: 12,
-    left: 14,
-    marginTop: 4,
+    fontSize: 11,
+    marginTop: 2,
   },
   cardEnPatient: {
-    left: 26,
     color: DSColors.primary,
   },
   cardEnDoctor: {
-    left: 26,
     color: DOCTOR_ICON,
   },
   cardDesc: {
     ...DSTypography.caption,
-    fontSize: 12,
-    lineHeight: 17,
-    left: 26,
+    fontSize: 11,
+    lineHeight: 15,
     color: DSColors.text.secondary,
-    marginTop: 6,
+    marginTop: 4,
   },
   chevronBox: {
-    width: CHEVRON_SLOT,
+    width: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    marginLeft: 4,
-  },
-  chevronBoxPhone: {
-    width: '100%',
-    alignItems: 'flex-end',
-    marginLeft: 0,
-    marginTop: 10,
+    flexShrink: 0,
   },
   helper: {
     ...DSTypography.caption,
@@ -349,15 +301,11 @@ const styles = StyleSheet.create({
   leftAccent: {
     position: 'absolute',
     left: 0.5,
-    top: 18,
-    bottom: 24,
+    top: 12,
+    bottom: 12,
     width: ACCENT_WIDTH,
     borderTopLeftRadius: DSShape.radiusCard,
     borderBottomLeftRadius: DSShape.radiusCard,
-  },
-  leftAccentPhone: {
-    top: 4,
-    bottom: 4,
   },
   leftAccentPatient: {
     backgroundColor: DSColors.primary,
