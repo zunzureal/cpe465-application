@@ -598,10 +598,11 @@ export function ActiveTherapySession({ isManualMode = false, manualOverrides }: 
   const customExtension = !isManualMode && targetExtension !== presets.extensionDegree;
   const customSpeed = !isManualMode && targetSpeed !== presets.speed;
   const customForceLevel = !isManualMode && presets.forceLevel != null && targetForceLevel !== presets.forceLevel;
+  const canFinishSession = timeLeft <= 0;
 
   const submitSessionResults = useCallback(async () => {
     if (painLevel === null) return;
-    if (!activePlanId) {
+    if (!isManualMode && !activePlanId) {
       setPostResultStatus('error');
       Alert.alert(
         'ส่งผลไม่สำเร็จ',
@@ -625,16 +626,16 @@ export function ActiveTherapySession({ isManualMode = false, manualOverrides }: 
     const actualMaxFlexion = maxFlexionRef.current;
     const actualMaxForceN = actualMaxForceNRef.current;
 
-    const payload = {
+    const payload: any = {
       patientId,
-      planId: activePlanId,
       sessionDate: new Date().toISOString(),
       actualMaxFlexion,
       durationCompleted: completed,
       painLevel,
-      isCustomUsed: isCustomSettings,
+      isCustomUsed: isManualMode ? true : isCustomSettings,
       actualMaxForceN,
     };
+    if (!isManualMode && activePlanId) payload.planId = activePlanId;
 
     try {
       const response = await submitSession(payload);
@@ -1294,7 +1295,12 @@ export function ActiveTherapySession({ isManualMode = false, manualOverrides }: 
           </TouchableOpacity>
 
           {/* Finish session */}
-          <TouchableOpacity activeOpacity={0.75} style={styles.bottomBtnFinish} onPress={handleFinishSession} disabled={sessionActionsLocked}>
+          <TouchableOpacity
+            activeOpacity={0.75}
+            style={[styles.bottomBtnFinish, (!canFinishSession || sessionActionsLocked) && styles.bottomBtnDisabled]}
+            onPress={handleFinishSession}
+            disabled={sessionActionsLocked || !canFinishSession}
+          >
             <Ionicons name="checkmark-circle" size={20} color="#FFFFFF" />
             <Text style={styles.bottomBtnFinishLabel}>เสร็จสิ้นการฝึก</Text>
             <Text style={[styles.bottomBtnSub, { color: 'rgba(255,255,255,0.75)' }]}>Finish Session</Text>
@@ -2097,6 +2103,9 @@ const styles = StyleSheet.create({
     borderRadius: DSShape.radiusButton,
     backgroundColor: DSColors.primary,
     gap: 2,
+  },
+  bottomBtnDisabled: {
+    opacity: 0.5,
   },
   bottomBtnFinishLabel: {
     fontSize: 13,

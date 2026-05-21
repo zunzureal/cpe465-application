@@ -88,6 +88,7 @@ export function DoctorOverviewDashboard() {
   const [newSurgeryLocation, setNewSurgeryLocation] = useState('');
   const [newMachine, setNewMachine] = useState('');
   const [activePicker, setActivePicker] = useState<AddPatientPicker>(null);
+  const [pickerCallback, setPickerCallback] = useState<((v: string) => void) | null>(null);
 
   const router = useRouter();
 
@@ -119,8 +120,9 @@ export function DoctorOverviewDashboard() {
     ],
   };
 
-  function openPicker(kind: Exclude<AddPatientPicker, null>) {
+  function openPicker(kind: Exclude<AddPatientPicker, null>, cb?: (v: string) => void) {
     setActivePicker(kind);
+    setPickerCallback(cb || null);
   }
 
   function closePicker() {
@@ -128,9 +130,18 @@ export function DoctorOverviewDashboard() {
   }
 
   function handlePickerSelect(value: string) {
-    if (activePicker === 'gender') setNewGender(value);
+    if (activePicker === 'gender') {
+      setNewGender(value);
+    }
     if (activePicker === 'surgery') setNewSurgeryLocation(value);
     if (activePicker === 'machine') setNewMachine(value);
+    // call any callback provided by the opener (e.g., PatientRow's setEditGender)
+    try {
+      if (pickerCallback) pickerCallback(value);
+    } catch (e) {
+      // ignore
+    }
+    setPickerCallback(null);
     setActivePicker(null);
   }
 
@@ -181,7 +192,7 @@ export function DoctorOverviewDashboard() {
       const hospitalNumber = newHn.trim();
       const parsedAge = Number(newAge);
 
-      if (!fullName) {
+      if (!newName.trim() || !newLastName.trim()) {
         alert('กรุณากรอกชื่อและนามสกุล');
         return;
       }
@@ -193,6 +204,10 @@ export function DoctorOverviewDashboard() {
       }
       if (!hospitalNumber) {
         alert('กรุณากรอก Hospital Number (HN)');
+        return;
+      }
+      if (!newGender) {
+        alert('กรุณาเลือกเพศ');
         return;
       }
       if (!newPhone.trim() || newPhone.trim().length !== 10) {
@@ -209,6 +224,7 @@ export function DoctorOverviewDashboard() {
         hospitalNumber,
         hnCode: hospitalNumber,
         phoneNumber: newPhone.trim(),
+        gender: newGender,
         age: parsedAge,
       };
       const res = await createPatient(authToken, payload);
@@ -319,7 +335,10 @@ export function DoctorOverviewDashboard() {
               >
                 <View style={styles.rowSplit}>
                   <View style={{ flex: 1, marginRight: 8 }}>
-                    <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>ชื่อ (First Name)</ThemedText>
+                    <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>
+                      ชื่อ (First Name)
+                      <Text style={{ color: DSColors.danger }}> *</Text>
+                    </ThemedText>
                     <TextInput
                       placeholder="ชื่อจริง"
                       placeholderTextColor={DSColors.text.secondary}
@@ -333,7 +352,10 @@ export function DoctorOverviewDashboard() {
                     />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>นามสกุล (Last Name)</ThemedText>
+                    <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>
+                      นามสกุล (Last Name)
+                      <Text style={{ color: DSColors.danger }}> *</Text>
+                    </ThemedText>
                     <TextInput
                       placeholder="นามสกุล"
                       placeholderTextColor={DSColors.text.secondary}
@@ -347,10 +369,16 @@ export function DoctorOverviewDashboard() {
                   </View>
                 </View>
 
-                <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>รหัสผู้ป่วย / HN (Hospital Number)</ThemedText>
+                <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>
+                  รหัสผู้ป่วย / HN (Hospital Number)
+                  <Text style={{ color: DSColors.danger }}> *</Text>
+                </ThemedText>
                 <TextInput placeholder="เช่น HN123456" placeholderTextColor={DSColors.text.secondary} value={newHn} onChangeText={setNewHn} style={styles.input} />
 
-                <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>เบอร์โทรศัพท์ (Phone Number) *</ThemedText>
+                <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>
+                  เบอร์โทรศัพท์ (Phone Number)
+                  <Text style={{ color: DSColors.danger }}> *</Text>
+                </ThemedText>
                 <TextInput
                   placeholder="08XXXXXXXX"
                   placeholderTextColor={DSColors.text.secondary}
@@ -368,7 +396,10 @@ export function DoctorOverviewDashboard() {
 
                 <View style={styles.rowSplit}>
                   <View style={{ flex: 1, marginRight: 8 }}>
-                    <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>อายุ (Age)</ThemedText>
+                    <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>
+                      อายุ (Age)
+                      <Text style={{ color: DSColors.danger }}> *</Text>
+                    </ThemedText>
                     <TextInput
                       placeholder="เช่น 45"
                       placeholderTextColor={DSColors.text.secondary}
@@ -383,7 +414,10 @@ export function DoctorOverviewDashboard() {
                     />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>เพศ (Gender)</ThemedText>
+                    <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>
+                      เพศ (Gender)
+                      <Text style={{ color: DSColors.danger }}> *</Text>
+                    </ThemedText>
                     <Pressable style={styles.selectBox} onPress={() => openPicker('gender')}>
                       <Text style={{ color: newGender ? DSColors.text.primary : DSColors.text.secondary }}>{newGender || '— เลือกเพศ —'}</Text>
                     </Pressable>
@@ -415,22 +449,7 @@ export function DoctorOverviewDashboard() {
           </View>
         </Modal>
 
-        <Modal visible={activePicker !== null} transparent animationType="fade" onRequestClose={closePicker}>
-          <Pressable style={styles.pickerOverlay} onPress={closePicker}>
-            <Pressable style={[styles.pickerCard, DSShadowSoft]} onPress={() => {}}>
-              <Text style={styles.pickerTitle}>{activePicker ? pickerTitleMap[activePicker] : ''}</Text>
-              {(activePicker ? pickerOptionsMap[activePicker] : []).map((option) => (
-                <Pressable
-                  key={option.value}
-                  style={({ pressed }) => [styles.pickerOption, pressed && styles.pickerOptionPressed]}
-                  onPress={() => handlePickerSelect(option.value)}
-                >
-                  <Text style={styles.pickerOptionText}>{option.label}</Text>
-                </Pressable>
-              ))}
-            </Pressable>
-          </Pressable>
-        </Modal>
+        
 
         {/* Summary cards */}
         <View style={[styles.summaryRow, isTablet && styles.summaryRowTablet]}>
@@ -486,7 +505,7 @@ export function DoctorOverviewDashboard() {
                     activeOpacity={0.7}
                     style={styles.rowPressable}
                   >
-                    <PatientRow item={item} />
+                    <PatientRow item={item} onOpenPicker={(kind, cb) => { setActivePicker(kind); setPickerCallback(cb || null); }} />
                   </TouchableOpacity>
                 )}
                 ItemSeparatorComponent={() => <View style={styles.separator} />}
@@ -510,14 +529,14 @@ export function DoctorOverviewDashboard() {
                     </View>
                   }
                   renderItem={({ item }) => (
-                    <TouchableOpacity
-                      onPress={() => { router.push(`/doctor/patient/${item.id}`); }}
-                      activeOpacity={0.7}
-                      style={styles.rowPressable}
-                    >
-                      <PatientRow item={item} />
-                    </TouchableOpacity>
-                  )}
+                      <TouchableOpacity
+                        onPress={() => { router.push(`/doctor/patient/${item.id}`); }}
+                        activeOpacity={0.7}
+                        style={styles.rowPressable}
+                      >
+                        <PatientRow item={item} onOpenPicker={(kind, cb) => { setActivePicker(kind); setPickerCallback(cb || null); }} />
+                      </TouchableOpacity>
+                    )}
                   ItemSeparatorComponent={() => <View style={styles.separator} />}
                   contentContainerStyle={filtered.length === 0 ? styles.listContentEmpty : undefined}
                   scrollEnabled
@@ -532,11 +551,28 @@ export function DoctorOverviewDashboard() {
           {/* ManagePatient now opens as a separate page via router.push(...) */}
         </View>
       </View>
-    </SafeAreaView>
+            {/* Picker modal rendered last so it appears above other modals (Edit/Add) */}
+            <Modal visible={activePicker !== null} transparent animationType="fade" onRequestClose={closePicker}>
+              <Pressable style={styles.pickerOverlay} onPress={closePicker}>
+                <Pressable style={[styles.pickerCard, DSShadowSoft]} onPress={() => {}}>
+                  <Text style={styles.pickerTitle}>{activePicker ? pickerTitleMap[activePicker] : ''}</Text>
+                  {(activePicker ? pickerOptionsMap[activePicker] : []).map((option) => (
+                    <Pressable
+                      key={option.value}
+                      style={({ pressed }) => [styles.pickerOption, pressed && styles.pickerOptionPressed]}
+                      onPress={() => handlePickerSelect(option.value)}
+                    >
+                      <Text style={styles.pickerOptionText}>{option.label}</Text>
+                    </Pressable>
+                  ))}
+                </Pressable>
+              </Pressable>
+            </Modal>
+        </SafeAreaView>
   );
 }
 
-function PatientRow({ item }: { item: Patient }) {
+function PatientRow({ item, onOpenPicker }: { item: Patient; onOpenPicker?: (kind: Exclude<AddPatientPicker, null>, cb?: (v: string) => void) => void }) {
   const statusColor =
     item.status === 'กำลังรักษา'
       ? DSColors.primary
@@ -556,6 +592,7 @@ function PatientRow({ item }: { item: Patient }) {
   const [editHn, setEditHn] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [editAge, setEditAge] = useState('');
+  const [editGender, setEditGender] = useState('');
 
   // Open edit modal and pre-fill data
   function openEditModal() {
@@ -566,6 +603,7 @@ function PatientRow({ item }: { item: Patient }) {
     setEditLastName(lastName);
     setEditHn(item.hnCode || '');
     setEditPhone(item?.phoneNumber || '');
+    setEditGender(item?.gender || '');
     setEditAge(item?.age?.toString() || '');
     setEditModalVisible(true);
   }
@@ -589,6 +627,10 @@ function PatientRow({ item }: { item: Patient }) {
       alert('กรุณากรอก Hospital Number (HN)');
       return;
     }
+    if (!editGender) {
+      alert('กรุณาเลือกเพศ');
+      return;
+    }
     if (!editPhone.trim() || editPhone.trim().length !== 10) {
       alert('กรุณากรอกเบอร์โทรศัพท์ให้ครบ 10 หลัก');
       return;
@@ -606,6 +648,7 @@ function PatientRow({ item }: { item: Patient }) {
         hnCode: editHn.trim(),
         phoneNumber: editPhone.trim(),
         age: parsedAge,
+        gender: editGender,
       });
       if (!res.success) {
         alert(res.error || 'ไม่สามารถบันทึกการแก้ไขได้');
@@ -702,7 +745,10 @@ function PatientRow({ item }: { item: Patient }) {
               >
                   <View style={styles.rowSplit}>
                     <View style={{ flex: 1, marginRight: 8 }}>
-                      <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>ชื่อ</ThemedText>
+                      <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>
+                        ชื่อ
+                        <Text style={{ color: DSColors.danger }}> *</Text>
+                      </ThemedText>
                       <TextInput
                         placeholder="ชื่อจริง"
                         placeholderTextColor={DSColors.text.secondary}
@@ -715,7 +761,10 @@ function PatientRow({ item }: { item: Patient }) {
                       />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>นามสกุล</ThemedText>
+                      <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>
+                        นามสกุล
+                        <Text style={{ color: DSColors.danger }}> *</Text>
+                      </ThemedText>
                       <TextInput
                         placeholder="นามสกุล"
                         placeholderTextColor={DSColors.text.secondary}
@@ -729,7 +778,10 @@ function PatientRow({ item }: { item: Patient }) {
                     </View>
                   </View>
 
-                  <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>รหัสผู้ป่วย (HN)</ThemedText>
+                  <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>
+                    รหัสผู้ป่วย (HN)
+                    <Text style={{ color: DSColors.danger }}> *</Text>
+                  </ThemedText>
                   <TextInput placeholder="เช่น HN123456" placeholderTextColor={DSColors.text.secondary} value={editHn} onChangeText={setEditHn} style={styles.input} />
 
                   <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>เบอร์โทรศัพท์ *</ThemedText>
@@ -748,7 +800,10 @@ function PatientRow({ item }: { item: Patient }) {
 
                   <View style={styles.rowSplit}>
                     <View style={{ flex: 1, marginRight: 8 }}>
-                      <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>อายุ</ThemedText>
+                      <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>
+                        อายุ
+                        <Text style={{ color: DSColors.danger }}> *</Text>
+                      </ThemedText>
                       <TextInput
                         placeholder="เช่น 45"
                         placeholderTextColor={DSColors.text.secondary}
@@ -760,6 +815,16 @@ function PatientRow({ item }: { item: Patient }) {
                         keyboardType="numeric"
                         style={styles.input}
                       />
+                    </View>
+
+                    <View style={{ flex: 1 }}>
+                      <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>
+                        เพศ (Gender)
+                        <Text style={{ color: DSColors.danger }}> *</Text>
+                      </ThemedText>
+                      <Pressable style={styles.selectBox} onPress={() => onOpenPicker && onOpenPicker('gender', (v: string) => setEditGender(v))}>
+                        <Text style={{ color: editGender ? DSColors.text.primary : DSColors.text.secondary }}>{editGender || '— เลือกเพศ —'}</Text>
+                      </Pressable>
                     </View>
                   </View>
                 </ScrollView>
@@ -787,6 +852,9 @@ function PatientRow({ item }: { item: Patient }) {
             <View style={[styles.modalCardWrapper, { padding: DSLayout.screenPadding, width: 320 }]}>
               <Text style={{ ...DSTypography.h3, color: DSColors.text.primary, marginBottom: 12 }}>ยืนยันการลบ</Text>
               <Text style={{ ...DSTypography.body, color: DSColors.text.secondary, marginBottom: 20 }}>คุณแน่ใจว่าต้องการลบผู้ป่วยนี้หรือไม่? การกระทำนี้ไม่สามารถย้อนกลับได้</Text>
+              <Text style={{ ...DSTypography.body, color: DSColors.text.secondary, marginBottom: 20 }}>
+                {`คุณแน่ใจว่าต้องการลบผู้ป่วย ${item.name || ''} ${item.hnCode || ''} นี้หรือไม่? การกระทำนี้ไม่สามารถย้อนกลับได้`}
+              </Text>
               <View style={{ flexDirection: 'row', gap: 10 }}>
                 <Pressable onPress={() => setConfirmDeleteVisible(false)} style={styles.outlineButton}>
                   <Text style={styles.outlineButtonText}>ยกเลิก</Text>

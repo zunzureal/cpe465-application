@@ -14,6 +14,7 @@ import {
   Text,
   View,
   useWindowDimensions,
+  TextStyle,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -78,15 +79,17 @@ export function LoginHeading({
   titleTh,
   titleEn,
   subtitle,
+  titleEnStyle,
 }: {
   titleTh: string;
   titleEn: string;
   subtitle: string;
+  titleEnStyle?: TextStyle;
 }) {
   return (
     <View style={shared.headingBlock}>
       <Text style={shared.titleTh}>{titleTh}</Text>
-      <Text style={shared.titleEn}>{titleEn}</Text>
+      <Text style={[shared.titleEn, titleEnStyle]}>{titleEn}</Text>
       <Text style={shared.subtitle}>{subtitle}</Text>
     </View>
   );

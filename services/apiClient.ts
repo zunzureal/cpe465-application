@@ -130,6 +130,7 @@ export interface DoctorPatient {
   hnCode: string;
   age: number;
   phoneNumber?: string;
+  gender?: string;
   hospitalId: number;
   primaryDoctorId: number;
   createdAt: string;
@@ -151,6 +152,7 @@ export interface CreatePatientPayload {
   phoneNumber?: string;
   age?: number;
   hospitalId?: number;
+  gender?: string;
 }
 
 /**
@@ -172,7 +174,7 @@ export async function createPatient(
 export async function getDoctorPatient(
   authToken: string,
   patientId: number
-): Promise<ApiResponse<{ id: number; name: string; hnCode: string; age?: number; phoneNumber?: string }>> {
+): Promise<ApiResponse<{ id: number; name: string; hnCode: string; age?: number; phoneNumber?: string; gender?: string }>> {
   return apiCall(`/api/patients/${patientId}`, {}, authToken);
 }
 
@@ -181,6 +183,7 @@ export interface UpdatePatientPayload {
   hnCode?: string;
   phoneNumber?: string;
   age?: number;
+  gender?: string;
 }
 
 /**
@@ -338,7 +341,7 @@ export async function deletePatient(
 
 export interface SessionSubmitPayload {
   patientId: number;
-  planId: number;
+  planId?: number | null;
   actualMaxFlexion: number;
   durationCompleted: number;
   isCustomUsed?: boolean;
@@ -365,7 +368,7 @@ export interface SessionEntry {
   kind: 'session';
   id: number;
   patientId: number;
-  planId: number;
+  planId?: number | null;
   actualMaxFlexion: number;
   durationCompleted: number;
   isCustomUsed: boolean;

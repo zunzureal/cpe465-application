@@ -41,7 +41,6 @@ export function PhoneLoginScreen({ onSuccess }: PhoneLoginScreenProps) {
       afterCard={
         <LoginFootnote
           th="หากเข้าสู่ระบบไม่ได้ กรุณาติดต่อคลินิกของคุณ"
-          en="If you cannot login, please contact your clinic."
         />
       }
     >
@@ -49,7 +48,7 @@ export function PhoneLoginScreen({ onSuccess }: PhoneLoginScreenProps) {
       <LoginHeading
         titleTh="ผู้ป่วย"
         titleEn="Patient"
-        subtitle="กรอกเบอร์โทรศัพท์ที่ลงทะเบียนกับคลินิกเพื่อเริ่มฝึกกายภาพ"
+        subtitle="กรอกเบอร์โทรศัพท์ที่ลงทะเบียนกับคลินิก"
       />
 
       <View style={shared.field}>

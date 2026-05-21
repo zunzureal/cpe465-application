@@ -15,6 +15,7 @@ import {
   LoginPrimaryButton,
   LoginScreenShell,
   shared,
+  DOCTOR_ICON,
 } from '@/components/screens/LoginScreenShell';
 import { DSColors } from '@/constants/design-system';
 
@@ -53,9 +54,6 @@ export function DoctorLoginScreen({ onSuccess, onBack }: DoctorLoginScreenProps)
     <LoginScreenShell
       afterCard={
         <>
-          {onBack ? (
-            <LoginBackRow label="กลับไปเลือกสถานะ" onPress={onBack} />
-          ) : null}
           <LoginFootnote th="หากลืมรหัสผ่าน กรุณาติดต่อผู้ดูแลระบบของคลินิก" />
         </>
       }
@@ -64,6 +62,7 @@ export function DoctorLoginScreen({ onSuccess, onBack }: DoctorLoginScreenProps)
       <LoginHeading
         titleTh="แพทย์ / นักกายภาพ"
         titleEn="Doctor / Physical therapist"
+        titleEnStyle={{ color: DOCTOR_ICON }}
         subtitle="กรอกอีเมลและรหัสผ่านที่ได้รับจากคลินิก"
       />
 

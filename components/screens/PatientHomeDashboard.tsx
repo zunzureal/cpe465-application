@@ -357,10 +357,6 @@ function CalendarWidget({ sessionStatusesByDate, sessionsPerDay, schedule }: Cal
           </View>
           <Text style={calStyles.legendText}>ยังไม่ทำ</Text>
         </View>
-        <View style={calStyles.legendItem}>
-          <View style={[calStyles.dayNumWrap, calStyles.dayNumWrapToday, { width: 18, height: 18, borderRadius: 9 }]} />
-          <Text style={calStyles.legendText}>วันนี้</Text>
-        </View>
       </View>
 
     </View>
