@@ -33,11 +33,18 @@ export function DoctorLoginScreen({ onSuccess, onBack }: DoctorLoginScreenProps)
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<{ email?: boolean; password?: boolean }>({});
 
   const valid =
     email.trim().length >= MIN_EMAIL && password.length >= MIN_PASS;
 
   const handleLogin = async () => {
+    const nextErrors = {
+      email: !email.trim(),
+      password: !password.trim(),
+    };
+    setFieldErrors(nextErrors);
+    if (nextErrors.email || nextErrors.password) return;
     if (!valid || isLoading) return;
 
     setIsLoading(true);
@@ -74,11 +81,16 @@ export function DoctorLoginScreen({ onSuccess, onBack }: DoctorLoginScreenProps)
       />
 
       <View style={shared.field}>
-        <LoginFieldLabel>อีเมล</LoginFieldLabel>
+        <LoginFieldLabel required hasError={fieldErrors.email}>
+          อีเมล
+        </LoginFieldLabel>
         <TextInput
-          style={shared.input}
+          style={[shared.input, fieldErrors.email && shared.inputError]}
           value={email}
-          onChangeText={setEmail}
+          onChangeText={(v) => {
+            setEmail(v);
+            if (fieldErrors.email) setFieldErrors((e) => ({ ...e, email: false }));
+          }}
           placeholder="doctor@hospital.com"
           placeholderTextColor={DSColors.text.secondary}
           autoCapitalize="none"
@@ -92,12 +104,17 @@ export function DoctorLoginScreen({ onSuccess, onBack }: DoctorLoginScreenProps)
       </View>
 
       <View style={shared.field}>
-        <LoginFieldLabel>รหัสผ่าน</LoginFieldLabel>
-        <View style={shared.passwordWrap}>
+        <LoginFieldLabel required hasError={fieldErrors.password}>
+          รหัสผ่าน
+        </LoginFieldLabel>
+        <View style={[shared.passwordWrap, fieldErrors.password && shared.inputErrorWrap]}>
           <TextInput
-            style={[shared.input, shared.passwordInput]}
+            style={[shared.input, shared.passwordInput, fieldErrors.password && shared.inputError]}
             value={password}
-            onChangeText={setPassword}
+            onChangeText={(v) => {
+              setPassword(v);
+              if (fieldErrors.password) setFieldErrors((e) => ({ ...e, password: false }));
+            }}
             placeholder="••••••••"
             placeholderTextColor={DSColors.text.secondary}
             secureTextEntry={!showPassword}

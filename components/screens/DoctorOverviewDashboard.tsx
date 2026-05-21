@@ -8,6 +8,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -27,6 +28,13 @@ import { useRouter, usePathname } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { PatientFormFields } from '@/components/forms/PatientFormFields';
+import {
+  clearFieldError,
+  hasAnyFieldError,
+  type FieldErrors,
+} from '@/components/ui/RequiredField';
+import { collectPatientFormEmptyErrors } from '@/utils/patientFormValidation';
 
 import {
   DSColors,
@@ -37,14 +45,75 @@ import {
   DSTypography,
 } from '@/constants/design-system';
 import { useAuth } from '@/contexts/AuthContext';
-import { getDoctorPatients, getDoctorPatient, type DoctorPatient, createPatient, putPatientPreset, deletePatient, updatePatient } from '@/services/apiClient';
+import {
+  getDoctorPatients,
+  getDoctorPatient,
+  type DoctorPatient,
+  type DoctorPatientDashboardStatus,
+  createPatient,
+  putPatientPreset,
+  deletePatient,
+  updatePatient,
+  DUPLICATE_PHONE_MESSAGE,
+} from '@/services/apiClient';
+
+type PatientAlertOptions = {
+  /** ปิด Modal ก่อนแสดง Alert — กัน Alert ถูก Modal แก้ไข/เพิ่มบัง (โดยเฉพาะตอน edit) */
+  dismissModal?: () => void;
+  /** หลังกดตกลง */
+  onDismiss?: () => void;
+};
+
+function showPatientAlert(title: string, message: string, opts?: PatientAlertOptions) {
+  opts?.dismissModal?.();
+  const delay = opts?.dismissModal ? (Platform.OS === 'web' ? 0 : 280) : 0;
+  setTimeout(() => {
+    Alert.alert(title, message, [
+      { text: 'ตกลง', style: 'default', onPress: opts?.onDismiss },
+    ]);
+  }, delay);
+}
+
+function alertPatientSaveError(error?: string, opts?: PatientAlertOptions) {
+  const msg = error?.trim() || '';
+  if (
+    msg.includes(DUPLICATE_PHONE_MESSAGE) ||
+    msg.includes('เบอร์นี้ได้') ||
+    msg.includes('ลงทะเบียนแล้ว')
+  ) {
+    showPatientAlert('แจ้งเตือน', DUPLICATE_PHONE_MESSAGE, opts);
+    return;
+  }
+  if (msg.includes('HN') || msg.includes('โรงพยาบาล')) {
+    showPatientAlert('แจ้งเตือน', msg, opts);
+    return;
+  }
+  showPatientAlert('ไม่สามารถบันทึกได้', msg || 'ไม่สามารถบันทึกข้อมูลผู้ป่วยได้', opts);
+}
 // ManagePatientScreen is a separate route now — navigate to it instead of embedding
 
 type Patient = DoctorPatient & {
-  status: string;
+  status: DoctorPatientDashboardStatus;
   lastSession?: string;
   program: string;
 };
+
+type ListFilter = 'all' | 'completed' | 'alerts';
+
+
+
+function buildPatientListMeta(p: DoctorPatient): Pick<Patient, 'status' | 'lastSession' | 'program'> {
+  const status = (p.status ?? 'รอแผน') as DoctorPatientDashboardStatus;
+  let lastSession: string | undefined;
+  if (status === 'แจ้งเตือน' && p.alertLabels?.length) {
+    lastSession = p.alertLabels.join(' · ');
+  } else if (p.scheduledToday && (p.sessionsTargetToday ?? 0) > 0) {
+    lastSession = `วันนี้ ${p.sessionsCompletedToday ?? 0}/${p.sessionsTargetToday} เซสชัน`;
+  } else if (status === 'รอแผน') {
+    lastSession = 'ยังไม่มีแผนการรักษา';
+  }
+  return { status, lastSession, program: 'เข่าขวา' };
+}
 
 type AddPatientPicker = 'gender' | 'surgery' | 'machine' | null;
 
@@ -107,6 +176,7 @@ function GenderPickerOverlay({
 
 export function DoctorOverviewDashboard() {
   const [search, setSearch] = useState('');
+  const [listFilter, setListFilter] = useState<ListFilter>('all');
   const [patients, setPatients] = useState<Patient[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -142,6 +212,7 @@ export function DoctorOverviewDashboard() {
   const [activePicker, setActivePicker] = useState<AddPatientPicker>(null);
   const [pickerCallback, setPickerCallback] = useState<((v: string) => void) | null>(null);
   const [showAddGenderPicker, setShowAddGenderPicker] = useState(false);
+  const [addFieldErrors, setAddFieldErrors] = useState<FieldErrors>({});
 
   const router = useRouter();
 
@@ -218,9 +289,7 @@ export function DoctorOverviewDashboard() {
       const displayPatients: Patient[] = response.data.patients.map((p) => ({
         ...p,
         gender: normalizeGender(p.gender),
-        program: 'เข่าขวา',
-        status: '',
-        lastSession: undefined,
+        ...buildPatientListMeta(p),
       }));
 
       setPatients(displayPatients);
@@ -239,43 +308,46 @@ export function DoctorOverviewDashboard() {
 
   async function handleAddPatient() {
     if (!authToken) return;
+    const dismissAddModal = () => {
+      setShowAddModal(false);
+      setShowAddGenderPicker(false);
+    };
+    const reopenAddModal = () => setShowAddModal(true);
+    const addAlertOpts: PatientAlertOptions = {
+      dismissModal: dismissAddModal,
+      onDismiss: reopenAddModal,
+    };
     try {
+      const emptyErrors = collectPatientFormEmptyErrors({
+        firstName: newName,
+        lastName: newLastName,
+        hn: newHn,
+        phone: newPhone,
+        age: newAge,
+        gender: newGender,
+      });
+      setAddFieldErrors(emptyErrors);
+      if (hasAnyFieldError(emptyErrors)) return;
+
       const fullName = `${newName.trim()} ${newLastName.trim()}`.trim();
       const hospitalNumber = newHn.trim();
       const parsedAge = Number(newAge);
 
-      if (!newName.trim() || !newLastName.trim()) {
-        alert('กรุณากรอกชื่อและนามสกุล');
-        return;
-      }
-      // Ensure name contains only Thai letters and spaces
       const thaiOnly = /^[\u0E00-\u0E7F\s]+$/;
       if (!thaiOnly.test(fullName)) {
-        alert('ชื่อและนามสกุลต้องเป็นตัวอักษรภาษาไทยเท่านั้น');
+        showPatientAlert('แจ้งเตือน', 'ชื่อและนามสกุลต้องเป็นตัวอักษรภาษาไทยเท่านั้น', addAlertOpts);
         return;
       }
-      if (!hospitalNumber) {
-        alert('กรุณากรอก Hospital Number (HN)');
+      if (newPhone.trim().length !== 10) {
+        showPatientAlert('แจ้งเตือน', 'กรุณากรอกเบอร์โทรศัพท์ให้ครบ 10 หลัก', addAlertOpts);
         return;
       }
-      if (!newGender) {
-        alert('กรุณาเลือกเพศ');
-        return;
-      }
-      if (!newPhone.trim() || newPhone.trim().length !== 10) {
-        alert('กรุณากรอกเบอร์โทรศัพท์ให้ครบ 10 หลัก');
-        return;
-      }
-      if (!newAge.trim() || Number.isNaN(parsedAge) || Number(parsedAge) < 0) {
-        alert('กรุณากรอกอายุเป็นตัวเลขบวก');
+      if (Number.isNaN(parsedAge) || parsedAge < 0) {
+        showPatientAlert('แจ้งเตือน', 'กรุณากรอกอายุเป็นตัวเลขบวก', addAlertOpts);
         return;
       }
 
       const genderValue = newGender.trim();
-      if (!genderValue) {
-        alert('กรุณาเลือกเพศ');
-        return;
-      }
 
       const payload = {
         name: fullName,
@@ -286,14 +358,15 @@ export function DoctorOverviewDashboard() {
       };
       const res = await createPatient(authToken, payload);
       if (!res.success) {
-        alert(res.error || 'ไม่สามารถเพิ่มผู้ป่วยได้');
+        alertPatientSaveError(res.error, addAlertOpts);
         return;
       }
       if ((res.data as { existing?: boolean })?.existing) {
-        alert('ผู้ป่วยนี้มีอยู่ในระบบแล้ว');
+        showPatientAlert('แจ้งเตือน', 'ผู้ป่วยนี้มีอยู่ในระบบแล้ว', addAlertOpts);
         return;
       }
       setShowAddModal(false);
+      setAddFieldErrors({});
       setNewName('');
       setNewLastName('');
       setNewHn('');
@@ -306,7 +379,7 @@ export function DoctorOverviewDashboard() {
       await fetchPatients();
     } catch (err) {
       console.error('[DoctorOverviewDashboard] Add patient error:', err);
-      alert('เกิดข้อผิดพลาดขณะเพิ่มผู้ป่วย');
+      showPatientAlert('เกิดข้อผิดพลาด', 'เกิดข้อผิดพลาดขณะเพิ่มเพิ่มข้อมูลผู้ป่วย', addAlertOpts);
     }
   }
 
@@ -314,11 +387,15 @@ export function DoctorOverviewDashboard() {
     // manage-plan flow moved to dedicated screen; no-op here
   }
 
-  const filtered = patients.filter(
-    (p) =>
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.hnCode.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = patients.filter((p) => {
+    const q = search.toLowerCase();
+    const matchesSearch =
+      p.name.toLowerCase().includes(q) || p.hnCode.toLowerCase().includes(q);
+    if (!matchesSearch) return false;
+    if (listFilter === 'completed') return p.status === 'ครบแล้ว';
+    if (listFilter === 'alerts') return p.status === 'แจ้งเตือน';
+    return true;
+  });
 
   // Calculate summary stats
   const totalPatients = patients.length;
@@ -357,7 +434,7 @@ export function DoctorOverviewDashboard() {
       <SafeAreaView style={styles.safeArea} edges={['top']}>
         <View style={styles.centerContainer}>
           <ActivityIndicator size="large" color={DSColors.primary} />
-          <Text style={styles.loadingText}>กำลังโหลดรายชื่อผู้ป่วย...</Text>
+          <Text style={styles.loadingText}>กำลังโหลดรายชื่อผู้ป่วย</Text>
         </View>
       </SafeAreaView>
     );
@@ -392,7 +469,7 @@ export function DoctorOverviewDashboard() {
           <View style={styles.editModalOverlay}>
             <View style={styles.editModalCard}>
               <View style={styles.editModalHeader}>
-                <Text style={styles.editModalTitle}>เพิ่มผู้ป่วย</Text>
+                <Text style={styles.editModalTitle}>เพิ่มข้อมูลผู้ป่วย</Text>
                 <Pressable onPress={() => setShowAddModal(false)} style={{ padding: 8 }}>
                   <Text style={{ fontSize: 18, color: DSColors.text.secondary, fontWeight: '600' }}>✕</Text>
                 </Pressable>
@@ -403,96 +480,42 @@ export function DoctorOverviewDashboard() {
                 contentContainerStyle={{ padding: 20, paddingBottom: 8 }}
                 keyboardShouldPersistTaps="handled"
               >
-                <View style={styles.rowSplit}>
-                  <View style={{ flex: 1, marginRight: 8 }}>
-                    <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>
-                      ชื่อ (First Name)
-                      <Text style={{ color: DSColors.danger }}> *</Text>
-                    </ThemedText>
-                    <TextInput
-                      placeholder="ชื่อจริง"
-                      placeholderTextColor={DSColors.text.secondary}
-                      value={newName}
-                      onChangeText={(text) => {
-                        // Allow only Thai characters and spaces while typing
-                        const sanitized = text.replace(/[^\u0E00-\u0E7F\s]/g, '');
-                        setNewName(sanitized);
-                      }}
-                      style={styles.input}
-                    />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>
-                      นามสกุล (Last Name)
-                      <Text style={{ color: DSColors.danger }}> *</Text>
-                    </ThemedText>
-                    <TextInput
-                      placeholder="นามสกุล"
-                      placeholderTextColor={DSColors.text.secondary}
-                      value={newLastName}
-                      onChangeText={(text) => {
-                        const sanitized = text.replace(/[^\u0E00-\u0E7F\s]/g, '');
-                        setNewLastName(sanitized);
-                      }}
-                      style={styles.input}
-                    />
-                  </View>
-                </View>
-
-                <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>
-                  รหัสผู้ป่วย / HN (Hospital Number)
-                  <Text style={{ color: DSColors.danger }}> *</Text>
-                </ThemedText>
-                <TextInput placeholder="เช่น HN123456" placeholderTextColor={DSColors.text.secondary} value={newHn} onChangeText={setNewHn} style={styles.input} />
-
-                <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>
-                  เบอร์โทรศัพท์ (Phone Number)
-                  <Text style={{ color: DSColors.danger }}> *</Text>
-                </ThemedText>
-                <TextInput
-                  placeholder="08XXXXXXXX"
-                  placeholderTextColor={DSColors.text.secondary}
-                  value={newPhone}
-                  onChangeText={(text) => {
-                    // Allow only digits and limit to 10 characters
-                    const digits = text.replace(/\D/g, '').slice(0, 10);
-                    setNewPhone(digits);
+                <PatientFormFields
+                  variant="add"
+                  values={{
+                    firstName: newName,
+                    lastName: newLastName,
+                    hn: newHn,
+                    phone: newPhone,
+                    age: newAge,
+                    gender: newGender,
                   }}
-                  maxLength={10}
-                  style={styles.input}
-                  keyboardType="phone-pad"
+                  fieldErrors={addFieldErrors}
+                  inputStyle={styles.input}
+                  selectBoxStyle={styles.selectBox}
+                  rowSplitStyle={styles.rowSplit}
+                  onChangeFirstName={(v) => {
+                    setNewName(v);
+                    setAddFieldErrors((e) => clearFieldError(e, 'firstName'));
+                  }}
+                  onChangeLastName={(v) => {
+                    setNewLastName(v);
+                    setAddFieldErrors((e) => clearFieldError(e, 'lastName'));
+                  }}
+                  onChangeHn={(v) => {
+                    setNewHn(v);
+                    setAddFieldErrors((e) => clearFieldError(e, 'hn'));
+                  }}
+                  onChangePhone={(v) => {
+                    setNewPhone(v);
+                    setAddFieldErrors((e) => clearFieldError(e, 'phone'));
+                  }}
+                  onChangeAge={(v) => {
+                    setNewAge(v);
+                    setAddFieldErrors((e) => clearFieldError(e, 'age'));
+                  }}
+                  onOpenGenderPicker={() => setShowAddGenderPicker(true)}
                 />
-                <ThemedText type="default" style={{ fontSize: 12, marginLeft: 4, marginBottom: 10, color: DSColors.text.secondary }}>ใช้สำหรับให้ผู้ป่วยเข้าสู่ระบบแอปพลิเคชัน (Used for patient app login)</ThemedText>
-
-                <View style={styles.rowSplit}>
-                  <View style={{ flex: 1, marginRight: 8 }}>
-                    <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>
-                      อายุ (Age)
-                      <Text style={{ color: DSColors.danger }}> *</Text>
-                    </ThemedText>
-                    <TextInput
-                      placeholder="เช่น 45"
-                      placeholderTextColor={DSColors.text.secondary}
-                      value={newAge}
-                      onChangeText={(text) => {
-                        // Allow only digits and prevent negative values
-                        const digits = text.replace(/\D/g, '');
-                        setNewAge(digits);
-                      }}
-                      keyboardType="numeric"
-                      style={styles.input}
-                    />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>
-                      เพศ (Gender)
-                      <Text style={{ color: DSColors.danger }}> *</Text>
-                    </ThemedText>
-                    <Pressable style={styles.selectBox} onPress={() => setShowAddGenderPicker(true)}>
-                      <Text style={{ color: newGender ? DSColors.text.primary : DSColors.text.secondary }}>{newGender || '— เลือกเพศ —'}</Text>
-                    </Pressable>
-                  </View>
-                </View>
 
                 {/* <View style={{ height: 12 }} />
                 <ThemedText type="title" style={{ fontSize: 22, marginBottom: 12, color: DSColors.text.primary }}>ข้อมูลการรักษาและอุปกรณ์ (Treatment & Device)</ThemedText> */}
@@ -518,31 +541,71 @@ export function DoctorOverviewDashboard() {
               <GenderPickerOverlay
                 visible={showAddGenderPicker}
                 onClose={() => setShowAddGenderPicker(false)}
-                onSelect={setNewGender}
+                onSelect={(v) => {
+                  setNewGender(v);
+                  setAddFieldErrors((e) => clearFieldError(e, 'gender'));
+                }}
               />
             </View>
           </View>
         </Modal>
 
-        {/* Summary cards */}
+        {/* Summary cards — tap to filter list */}
         <View style={[styles.summaryRow, isTablet && styles.summaryRowTablet]}>
-          {summaryCards.map((card) => (
-            <View key={card.key} style={[styles.summaryCard, DSShadowSoft]}>
-              <View style={[styles.summaryIconWrap, { backgroundColor: card.bg }]}>
-                <Ionicons name={card.icon} size={28} color={card.color} />
-              </View>
-              <Text style={styles.summaryValue}>{card.value}</Text>
-              <Text style={styles.summaryLabel}>{card.label}</Text>
-            </View>
-          ))}
+          {summaryCards.map((card) => {
+            const active =
+              (card.key === 'completed' && listFilter === 'completed') ||
+              (card.key === 'alerts' && listFilter === 'alerts') ||
+              (card.key === 'total' && listFilter === 'all');
+            return (
+              <Pressable
+                key={card.key}
+                style={[
+                  styles.summaryCard,
+                  DSShadowSoft,
+                  active && styles.summaryCardActive,
+                ]}
+                onPress={() => {
+                  if (card.key === 'total') setListFilter('all');
+                  else if (card.key === 'completed') {
+                    setListFilter((f) => (f === 'completed' ? 'all' : 'completed'));
+                  } else if (card.key === 'alerts') {
+                    setListFilter((f) => (f === 'alerts' ? 'all' : 'alerts'));
+                  }
+                }}
+              >
+                <View style={[styles.summaryIconWrap, { backgroundColor: card.bg }]}>
+                  <Ionicons name={card.icon} size={28} color={card.color} />
+                </View>
+                <Text style={styles.summaryValue}>{card.value}</Text>
+                <Text style={styles.summaryLabel}>{card.label}</Text>
+              </Pressable>
+            );
+          })}
         </View>
+        {listFilter !== 'all' && (
+          <Pressable onPress={() => setListFilter('all')} style={styles.filterBanner}>
+            <Text style={styles.filterBannerText}>
+              {listFilter === 'completed'
+                ? 'แสดงเฉพาะผู้ป่วยที่ทำครบวันนี้'
+                : 'แสดงเฉพาะผู้ป่วยที่มีแจ้งเตือน'}
+            </Text>
+            <Text style={styles.filterBannerClear}>ล้างตัวกรอง ✕</Text>
+          </Pressable>
+        )}
 
         {/* Patient list section */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>รายชื่อผู้ป่วย</Text>
-            <Pressable style={styles.addButton} onPress={() => setShowAddModal(true)}>
-              <Text style={styles.addButtonText}>+ เพิ่มผู้ป่วย</Text>
+            <Pressable
+              style={styles.addButton}
+              onPress={() => {
+                setAddFieldErrors({});
+                setShowAddModal(true);
+              }}
+            >
+              <Text style={styles.addButtonText}>+ เพิ่มข้อมูลผู้ป่วย</Text>
             </Pressable>
           </View>
 
@@ -550,7 +613,7 @@ export function DoctorOverviewDashboard() {
             <Ionicons name="search" size={20} color={DSColors.text.secondary} />
             <TextInput
               style={styles.searchInput}
-              placeholder="ค้นหาชื่อหรือรหัสประจำตัว..."
+              placeholder="ค้นหาชื่อ นามสกุล และรหัสผู้ป่วย"
               placeholderTextColor={DSColors.text.secondary}
               value={search}
               onChangeText={setSearch}
@@ -660,11 +723,13 @@ function PatientRow({
   onPatientUpdated?: () => void;
 }) {
   const statusColor =
-    item.status === 'กำลังรักษา'
-      ? DSColors.primary
+    item.status === 'แจ้งเตือน'
+      ? DSColors.danger
       : item.status === 'ครบแล้ว'
         ? DSColors.success
-        : DSColors.text.secondary;
+        : item.status === 'กำลังรักษา'
+          ? DSColors.primary
+          : DSColors.text.secondary;
 
   // local UI state for actions
   const [busy, setBusy] = useState(false);
@@ -681,6 +746,7 @@ function PatientRow({
   const [editGender, setEditGender] = useState('');
   const [editGenderPickerVisible, setEditGenderPickerVisible] = useState(false);
   const [editLoading, setEditLoading] = useState(false);
+  const [editFieldErrors, setEditFieldErrors] = useState<FieldErrors>({});
 
   function prefillEditForm(patient: {
     name?: string;
@@ -732,39 +798,49 @@ function PatientRow({
 
   function openEditModal() {
     setEditGenderPickerVisible(false);
+    setEditFieldErrors({});
     setEditModalVisible(true);
   }
 
   async function handleSaveEdit() {
+    const dismissEditModal = () => {
+      setEditModalVisible(false);
+      setEditGenderPickerVisible(false);
+    };
+    const reopenEditModal = () => setEditModalVisible(true);
+    const editAlertOpts: PatientAlertOptions = {
+      dismissModal: dismissEditModal,
+      onDismiss: reopenEditModal,
+    };
+
     if (!authToken) {
-      alert('ไม่มีสิทธิ์');
+      showPatientAlert('แจ้งเตือน', 'ไม่มีสิทธิ์', editAlertOpts);
       return;
     }
+    const emptyErrors = collectPatientFormEmptyErrors({
+      firstName: editName,
+      lastName: editLastName,
+      hn: editHn,
+      phone: editPhone,
+      age: editAge,
+      gender: editGender,
+    });
+    setEditFieldErrors(emptyErrors);
+    if (hasAnyFieldError(emptyErrors)) return;
+
     const fullName = `${editName.trim()} ${editLastName.trim()}`.trim();
-    if (!fullName) {
-      alert('กรุณากรอกชื่อและนามสกุล');
-      return;
-    }
     const thaiOnly = /^[\u0E00-\u0E7F\s]+$/;
     if (!thaiOnly.test(fullName)) {
-      alert('ชื่อและนามสกุลต้องเป็นตัวอักษรภาษาไทยเท่านั้น');
+      showPatientAlert('แจ้งเตือน', 'ชื่อและนามสกุลต้องเป็นตัวอักษรภาษาไทยเท่านั้น', editAlertOpts);
       return;
     }
-    if (!editHn.trim()) {
-      alert('กรุณากรอก Hospital Number (HN)');
-      return;
-    }
-    if (!editGender) {
-      alert('กรุณาเลือกเพศ');
-      return;
-    }
-    if (!editPhone.trim() || editPhone.trim().length !== 10) {
-      alert('กรุณากรอกเบอร์โทรศัพท์ให้ครบ 10 หลัก');
+    if (editPhone.trim().length !== 10) {
+      showPatientAlert('แจ้งเตือน', 'กรุณากรอกเบอร์โทรศัพท์ให้ครบ 10 หลัก', editAlertOpts);
       return;
     }
     const parsedAge = Number(editAge);
-    if (!editAge.trim() || Number.isNaN(parsedAge) || parsedAge < 0) {
-      alert('กรุณากรอกอายุเป็นตัวเลขบวก');
+    if (Number.isNaN(parsedAge) || parsedAge < 0 || parsedAge >= 130) {
+      showPatientAlert('แจ้งเตือน', 'กรุณากรอกอายุเป็นตัวเลขบวก หรือ น้อยกว่าเท่ากับ 130', editAlertOpts);
       return;
     }
 
@@ -778,16 +854,17 @@ function PatientRow({
         gender: editGender,
       });
       if (!res.success) {
-        alert(res.error || 'ไม่สามารถบันทึกการแก้ไขได้');
+        alertPatientSaveError(res.error, editAlertOpts);
       } else {
-        alert('บันทึกการแก้ไขเสร็จแล้ว');
-        setEditModalVisible(false);
+        dismissEditModal();
+        setEditFieldErrors({});
+        showPatientAlert('สำเร็จ', 'บันทึกการแก้ไขเสร็จแล้ว');
         onPatientUpdated?.();
         router.replace(pathname as any);
       }
     } catch (err) {
       console.error('[DoctorOverviewDashboard] Edit error:', err);
-      alert('เกิดข้อผิดพลาดในการแก้ไขข้อมูลผู้ป่วย');
+      showPatientAlert('เกิดข้อผิดพลาด', 'เกิดข้อผิดพลาดในการแก้ไขข้อมูลผู้ป่วย', editAlertOpts);
     } finally {
       setBusy(false);
     }
@@ -795,21 +872,21 @@ function PatientRow({
 
   async function handleDelete() {
     if (!authToken) {
-      alert('ไม่มีสิทธิ์');
+      showPatientAlert('แจ้งเตือน', 'ไม่มีสิทธิ์');
       return;
     }
     setBusy(true);
     try {
       const res = await deletePatient(authToken, item.id);
       if (!res.success) {
-        alert(res.error || 'ไม่สามารถลบผู้ป่วยได้ (backend may not support delete)');
+        showPatientAlert('ไม่สามารถลบได้', res.error || 'ไม่สามารถลบผู้ป่วยได้');
       } else {
         // refresh list by emitting a navigation refresh (simpler) — rely on parent page to refetch on focus
         router.replace(pathname as any);
       }
     } catch (err) {
       console.error('[DoctorOverviewDashboard] Delete error:', err);
-      alert('เกิดข้อผิดพลาดในการลบผู้ป่วย');
+      showPatientAlert('เกิดข้อผิดพลาด', 'เกิดข้อผิดพลาดในการลบผู้ป่วย');
     } finally {
       setBusy(false);
       setConfirmDeleteVisible(false);
@@ -823,12 +900,14 @@ function PatientRow({
       </View>
       <View style={styles.rowBody}>
         <Text style={styles.rowName}>{item.name?.trim() || 'ไม่ระบุชื่อผู้ป่วย'}</Text>
-        <Text style={styles.rowProgram}>{item.program}</Text>
+        <Text style={styles.rowProgram}>{item.program} {item.hnCode}</Text>
         {!!item.lastSession && <Text style={styles.rowLast}>{item.lastSession}</Text>}
       </View>
-      {/* <View style={[styles.statusChip, { backgroundColor: `${statusColor}18` }]}>
-        <Text style={[styles.statusText, { color: statusColor }]}>{item.status}</Text>
-      </View> */}
+      {/* {!!item.status && (
+        <View style={[styles.statusChip, { backgroundColor: `${statusColor}18` }]}>
+          <Text style={[styles.statusText, { color: statusColor }]}>{item.status}</Text>
+        </View>
+      )} */}
 
       {/* Action icons: Edit and Delete */}
       <View style={styles.rowActions}>
@@ -870,7 +949,7 @@ function PatientRow({
           <View style={styles.editModalOverlay}>
             <View style={styles.editModalCard}>
               <View style={styles.editModalHeader}>
-                <Text style={styles.editModalTitle}>ปรับข้อมูลผู้ป่วย</Text>
+                <Text style={styles.editModalTitle}>แก้ไขข้อมูลผู้ป่วย</Text>
                 <Pressable
                   onPress={() => {
                     setEditModalVisible(false);
@@ -887,100 +966,43 @@ function PatientRow({
                 contentContainerStyle={{ padding: 20, paddingBottom: 8 }}
                 keyboardShouldPersistTaps="handled"
               >
-                <View style={styles.rowSplit}>
-                  <View style={{ flex: 1, marginRight: 8 }}>
-                    <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>
-                      ชื่อ
-                      <Text style={{ color: DSColors.danger }}> *</Text>
-                    </ThemedText>
-                    <TextInput
-                      placeholder="ชื่อจริง"
-                      placeholderTextColor={DSColors.text.secondary}
-                      value={editName}
-                      onChangeText={(text) => {
-                        const sanitized = text.replace(/[^\u0E00-\u0E7F\s]/g, '');
-                        setEditName(sanitized);
-                      }}
-                      style={styles.input}
-                    />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>
-                      นามสกุล
-                      <Text style={{ color: DSColors.danger }}> *</Text>
-                    </ThemedText>
-                    <TextInput
-                      placeholder="นามสกุล"
-                      placeholderTextColor={DSColors.text.secondary}
-                      value={editLastName}
-                      onChangeText={(text) => {
-                        const sanitized = text.replace(/[^\u0E00-\u0E7F\s]/g, '');
-                        setEditLastName(sanitized);
-                      }}
-                      style={styles.input}
-                    />
-                  </View>
-                </View>
-
-                <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>
-                  รหัสผู้ป่วย (HN)
-                  <Text style={{ color: DSColors.danger }}> *</Text>
-                </ThemedText>
-                <TextInput placeholder="เช่น HN123456" placeholderTextColor={DSColors.text.secondary} value={editHn} onChangeText={setEditHn} style={styles.input} />
-
-                <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>เบอร์โทรศัพท์ *</ThemedText>
-                <TextInput
-                  placeholder="08XXXXXXXX"
-                  placeholderTextColor={DSColors.text.secondary}
-                  value={editPhone}
-                  onChangeText={(text) => {
-                    const digits = text.replace(/\D/g, '').slice(0, 10);
-                    setEditPhone(digits);
+                <PatientFormFields
+                  variant="edit"
+                  values={{
+                    firstName: editName,
+                    lastName: editLastName,
+                    hn: editHn,
+                    phone: editPhone,
+                    age: editAge,
+                    gender: editGender,
                   }}
-                  maxLength={10}
-                  style={styles.input}
-                  keyboardType="phone-pad"
+                  fieldErrors={editFieldErrors}
+                  inputStyle={styles.input}
+                  selectBoxStyle={styles.selectBox}
+                  rowSplitStyle={styles.rowSplit}
+                  genderPickerLoading={editLoading}
+                  onChangeFirstName={(v) => {
+                    setEditName(v);
+                    setEditFieldErrors((e) => clearFieldError(e, 'firstName'));
+                  }}
+                  onChangeLastName={(v) => {
+                    setEditLastName(v);
+                    setEditFieldErrors((e) => clearFieldError(e, 'lastName'));
+                  }}
+                  onChangeHn={(v) => {
+                    setEditHn(v);
+                    setEditFieldErrors((e) => clearFieldError(e, 'hn'));
+                  }}
+                  onChangePhone={(v) => {
+                    setEditPhone(v);
+                    setEditFieldErrors((e) => clearFieldError(e, 'phone'));
+                  }}
+                  onChangeAge={(v) => {
+                    setEditAge(v);
+                    setEditFieldErrors((e) => clearFieldError(e, 'age'));
+                  }}
+                  onOpenGenderPicker={() => setEditGenderPickerVisible(true)}
                 />
-
-                <View style={styles.rowSplit}>
-                  <View style={{ flex: 1, marginRight: 8 }}>
-                    <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>
-                      อายุ
-                      <Text style={{ color: DSColors.danger }}> *</Text>
-                    </ThemedText>
-                    <TextInput
-                      placeholder="เช่น 45"
-                      placeholderTextColor={DSColors.text.secondary}
-                      value={editAge}
-                      onChangeText={(text) => {
-                        const digits = text.replace(/\D/g, '');
-                        setEditAge(digits);
-                      }}
-                      keyboardType="numeric"
-                      style={styles.input}
-                    />
-                  </View>
-
-                  <View style={{ flex: 1 }}>
-                    <ThemedText type="subtitle" style={{ fontSize: 16, marginBottom: 6, color: DSColors.text.primary }}>
-                      เพศ (Gender)
-                      <Text style={{ color: DSColors.danger }}> *</Text>
-                    </ThemedText>
-                    <Pressable
-                      style={styles.selectBox}
-                      onPress={() => setEditGenderPickerVisible(true)}
-                      disabled={editLoading}
-                    >
-                      {editLoading ? (
-                        <ActivityIndicator size="small" color={DSColors.primary} />
-                      ) : (
-                        <Text style={{ color: editGender ? DSColors.text.primary : DSColors.text.secondary }}>
-                          {editGender || '— เลือกเพศ —'}
-                        </Text>
-                      )}
-                    </Pressable>
-                  </View>
-                </View>
               </ScrollView>
 
               <View style={styles.editModalFooter}>
@@ -1005,7 +1027,10 @@ function PatientRow({
               <GenderPickerOverlay
                 visible={editGenderPickerVisible}
                 onClose={() => setEditGenderPickerVisible(false)}
-                onSelect={setEditGender}
+                onSelect={(v) => {
+                  setEditGender(v);
+                  setEditFieldErrors((e) => clearFieldError(e, 'gender'));
+                }}
               />
             </View>
           </View>
@@ -1110,6 +1135,38 @@ const styles = StyleSheet.create({
     color: DSColors.text.secondary,
     marginTop: 4,
     textAlign: 'center',
+  },
+  summaryHint: {
+    fontSize: 11,
+    color: DSColors.text.secondary,
+    marginTop: 6,
+    textAlign: 'center',
+    lineHeight: 15,
+    paddingHorizontal: 4,
+  },
+  summaryCardActive: {
+    borderWidth: 2,
+    borderColor: DSColors.primary,
+  },
+  filterBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: DSColors.primaryLight,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    marginBottom: 12,
+  },
+  filterBannerText: {
+    fontSize: 14,
+    color: DSColors.text.primary,
+    flex: 1,
+  },
+  filterBannerClear: {
+    fontSize: 14,
+    color: DSColors.primary,
+    fontWeight: '600',
   },
   section: {
     flex: 1,
@@ -1240,6 +1297,7 @@ const styles = StyleSheet.create({
   editModalTitle: {
     ...DSTypography.h3,
     color: DSColors.text.primary,
+    marginTop: 32,
   },
   editModalFooter: {
     flexDirection: 'row',

@@ -14,6 +14,9 @@ const CLOUD_RUN_API_BASE = 'https://project-465-service-649507438534.asia-southe
 // 1) EXPO_PUBLIC_API_BASE_URL (recommended; set in .env.local for network access)
 // 2) Cloud Run shared backend
 // 3) Platform defaults for local development
+/** แจ้งเตือนเมื่อเบอร์โทรซ้ำ (สร้าง/แก้ไขผู้ป่วย) */
+export const DUPLICATE_PHONE_MESSAGE = 'เบอร์นี้ได้ทำการลงทะเบียนแล้ว';
+
 export const API_BASE =
   process.env.EXPO_PUBLIC_API_BASE_URL?.replace(/\/$/, '') ||
   CLOUD_RUN_API_BASE ||
@@ -124,6 +127,13 @@ export async function doctorLogin(
   });
 }
 
+/** สถานะบน Dashboard แพทย์ */
+export type DoctorPatientDashboardStatus =
+  | 'ครบแล้ว'
+  | 'แจ้งเตือน'
+  | 'กำลังรักษา'
+  | 'รอแผน';
+
 export interface DoctorPatient {
   id: number;
   name: string;
@@ -134,6 +144,14 @@ export interface DoctorPatient {
   hospitalId: number;
   primaryDoctorId: number;
   createdAt: string;
+  /** จาก API — ใช้คำนวณการ์ดสรุปและไฮไลต์รายชื่อ */
+  status?: DoctorPatientDashboardStatus;
+  alertReasons?: string[];
+  alertLabels?: string[];
+  sessionsCompletedToday?: number;
+  sessionsTargetToday?: number;
+  scheduledToday?: boolean;
+  lastSessionAt?: string | null;
 }
 
 /**

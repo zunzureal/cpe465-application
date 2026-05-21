@@ -95,8 +95,27 @@ export function LoginHeading({
   );
 }
 
-export function LoginFieldLabel({ children }: { children: string }) {
-  return <Text style={shared.label}>{children}</Text>;
+export function LoginFieldLabel({
+  children,
+  required,
+  hasError,
+}: {
+  children: string;
+  required?: boolean;
+  hasError?: boolean;
+}) {
+  return (
+    <Text style={shared.label}>
+      {children}
+      {required ? <Text style={{ color: DSColors.danger }}> *</Text> : null}
+      {hasError ? (
+        <Text style={{ color: DSColors.danger, fontSize: 13, fontWeight: '500' }}>
+          {' '}
+          กรุณากรอกข้อมูล
+        </Text>
+      ) : null}
+    </Text>
+  );
 }
 
 export function LoginPrimaryButton({
@@ -230,6 +249,15 @@ export const shared = StyleSheet.create({
   },
   field: {
     marginBottom: 18,
+  },
+  inputError: {
+    borderColor: DSColors.danger,
+    borderWidth: 2,
+  },
+  inputErrorWrap: {
+    borderRadius: DSShape.radiusButton,
+    borderWidth: 2,
+    borderColor: DSColors.danger,
   },
   input: {
     borderWidth: 2,

@@ -27,10 +27,16 @@ export interface PhoneLoginScreenProps {
 export function PhoneLoginScreen({ onSuccess }: PhoneLoginScreenProps) {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  const [phoneError, setPhoneError] = useState(false);
   const digits = phoneNumber.replace(/\D/g, '');
   const canSubmit = digits.length >= MIN_PHONE_DIGITS;
 
   const submit = async () => {
+    if (!digits.length) {
+      setPhoneError(true);
+      return;
+    }
+    setPhoneError(false);
     if (!canSubmit) return;
     setErrorMessage('');
     try {
@@ -66,11 +72,16 @@ export function PhoneLoginScreen({ onSuccess }: PhoneLoginScreenProps) {
       />
 
       <View style={shared.field}>
-        <LoginFieldLabel>เบอร์โทรศัพท์</LoginFieldLabel>
+        <LoginFieldLabel required hasError={phoneError}>
+          เบอร์โทรศัพท์
+        </LoginFieldLabel>
         <TextInput
-          style={shared.inputPhone}
+          style={[shared.inputPhone, phoneError && shared.inputError]}
           value={phoneNumber}
-          onChangeText={setPhoneNumber}
+          onChangeText={(v) => {
+            setPhoneNumber(v);
+            if (phoneError) setPhoneError(false);
+          }}
           placeholder="08X XXX XXXX"
           placeholderTextColor={DSColors.text.secondary}
           keyboardType="phone-pad"

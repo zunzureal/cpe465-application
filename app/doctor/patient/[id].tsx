@@ -11,6 +11,14 @@ import { putPatientPreset, getDoctorPatient, getPatientPreset, getPatientSession
 import { bangkokParts, toBangkokDateKey } from '@/utils/dateUtils';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import {
+  RequiredFieldLabel,
+  withRequiredFieldBorder,
+  hasAnyFieldError,
+  clearFieldError,
+  type FieldErrors,
+} from '@/components/ui/RequiredField';
+import { collectPlanFormEmptyErrors } from '@/utils/planFormValidation';
 import DateTimePicker, { useDefaultStyles, type DateType } from 'react-native-calendars-datepicker';
 
 const TARGET_LINE_COLOR = '#7DD3FC';
@@ -46,27 +54,87 @@ function sanitizePositiveInteger(rawValue: string, maxDigits: number) {
   return rawValue.replace(/\D/g, '').slice(0, maxDigits);
 }
 
-function RequiredFieldLabel({
-  children,
-  style,
-}: {
-  children: React.ReactNode;
-  style?: object;
-}) {
-  return (
-    <Text style={[styles.fieldLabel, style]}>
-      {children}
-      <Text style={{ color: DSColors.danger }}> *</Text>
-    </Text>
-  );
-}
-
 const REALISTIC_LIMITS = {
   flexion: { min: 0, max: 135 },
   extension: { min: 0, max: 180 },
   speed: { min: 1, max: 10 },
   forceLevel: { min: 1, max: 10 },
 } as const;
+
+type PlanFormSnapshot = {
+  planStart: string;
+  planEnd: string;
+  sessionsPerDay: string;
+  daysOfWeek: boolean[];
+  targetFlexion: string;
+  targetExtension: string;
+  speedLevel: string;
+  durationMinutes: string;
+  targetForceN: string;
+  useWarmup: boolean;
+};
+
+function createDefaultDaysOfWeek() {
+  return [false, false, false, false, false, false, false];
+}
+
+function getDefaultPlanForm(): PlanFormSnapshot {
+  return {
+    planStart: '',
+    planEnd: '',
+    sessionsPerDay: '1',
+    daysOfWeek: createDefaultDaysOfWeek(),
+    targetFlexion: '120',
+    targetExtension: '0',
+    speedLevel: '5',
+    durationMinutes: '10',
+    targetForceN: '70',
+    useWarmup: true,
+  };
+}
+
+function toIsoDate(s?: string) {
+  if (!s) return '';
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return '';
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function planFormFromPreset(p: Record<string, unknown>): PlanFormSnapshot {
+  const days = createDefaultDaysOfWeek();
+  if (Array.isArray(p.daysOfWeek)) {
+    (p.daysOfWeek as number[]).forEach((idx) => {
+      if (idx >= 0 && idx <= 6) days[idx] = true;
+    });
+  }
+  return {
+    planStart: toIsoDate(p.startDate as string | undefined),
+    planEnd: toIsoDate(p.endDate as string | undefined),
+    sessionsPerDay: String(p.sessionsPerDay ?? 1),
+    daysOfWeek: days,
+    targetFlexion: clampNumber(
+      String(p.targetFlexion ?? p.flexion ?? 120),
+      REALISTIC_LIMITS.flexion.min,
+      REALISTIC_LIMITS.flexion.max
+    ),
+    targetExtension: clampNumber(
+      String(p.targetExtension ?? p.extension ?? 0),
+      REALISTIC_LIMITS.extension.min,
+      REALISTIC_LIMITS.extension.max
+    ),
+    speedLevel: clampNumber(
+      String(p.speedLevel ?? p.speed ?? 5),
+      REALISTIC_LIMITS.speed.min,
+      REALISTIC_LIMITS.speed.max
+    ),
+    durationMinutes: String(p.durationMinutes ?? p.duration ?? 10),
+    targetForceN: String(p.targetForceN ?? 70),
+    useWarmup: Boolean(p.useWarmup ?? p.warmUp ?? true),
+  };
+}
 
 function AndroidTabletProgressFallback({
   sessions,
@@ -146,6 +214,7 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
   const [sessionsPerDay, setSessionsPerDay] = useState('1');
   const [daysOfWeek, setDaysOfWeek] = useState<boolean[]>([false, false, false, false, false, false, false]);
   const [planError, setPlanError] = useState<string | null>(null);
+  const [planFieldErrors, setPlanFieldErrors] = useState<FieldErrors>({});
   const [isSaving, setIsSaving] = useState(false);
   const [patientName, setPatientName] = useState<string | null>(null);
   const [patientHn, setPatientHn] = useState<string | null>(null);
@@ -163,6 +232,43 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
   const [existingPlan, setExistingPlan] = useState<any>(null);
   const [isDeletingPlan, setIsDeletingPlan] = useState(false);
   const [confirmDeleteVisible, setConfirmDeleteVisible] = useState(false);
+
+  function applyPlanForm(snapshot: PlanFormSnapshot) {
+    setPlanStart(snapshot.planStart);
+    setPlanEnd(snapshot.planEnd);
+    setSessionsPerDay(snapshot.sessionsPerDay);
+    setDaysOfWeek([...snapshot.daysOfWeek]);
+    setTargetFlexion(snapshot.targetFlexion);
+    setTargetExtension(snapshot.targetExtension);
+    setSpeedLevel(snapshot.speedLevel);
+    setDurationMinutes(snapshot.durationMinutes);
+    setTargetForceN(snapshot.targetForceN);
+    setUseWarmup(snapshot.useWarmup);
+  }
+
+  function openPlanModal() {
+    if (existingPlan) {
+      applyPlanForm(planFormFromPreset(existingPlan as Record<string, unknown>));
+    } else {
+      applyPlanForm(getDefaultPlanForm());
+    }
+    setPlanError(null);
+    setPlanFieldErrors({});
+    setShowRangePicker(false);
+    setShowPlanModal(true);
+  }
+
+  function closePlanModal() {
+    setShowPlanModal(false);
+    setShowRangePicker(false);
+    if (existingPlan) {
+      applyPlanForm(planFormFromPreset(existingPlan as Record<string, unknown>));
+    } else {
+      applyPlanForm(getDefaultPlanForm());
+    }
+    setPlanError(null);
+    setPlanFieldErrors({});
+  }
 
   // Compute which weekdays are present in the selected plan range (0=Sun..6=Sat)
   function getAllowedWeekdays(start: string, end: string) {
@@ -206,37 +312,12 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
       if (Number.isNaN(patientId)) return;
       const presetRes = await getPatientPreset(patientId);
       if (presetRes.success && presetRes.data) {
-        const p = presetRes.data as any;
+        const p = presetRes.data as Record<string, unknown>;
         setExistingPlan(p);
-        setTargetFlexion(clampNumber(String(p.targetFlexion ?? 135), REALISTIC_LIMITS.flexion.min, REALISTIC_LIMITS.flexion.max));
-        setTargetExtension(clampNumber(String(p.targetExtension ?? 0), REALISTIC_LIMITS.extension.min, REALISTIC_LIMITS.extension.max));
-        setSpeedLevel(clampNumber(String(p.speedLevel ?? 5), REALISTIC_LIMITS.speed.min, REALISTIC_LIMITS.speed.max));
-        setDurationMinutes(String(p.durationMinutes ?? 10));
-        setUseWarmup(Boolean(p.useWarmup ?? true));
-        setTargetForceN(String(p.targetForceN ?? 70));
-
-        // Scheduling fields — convert ISO date to YYYY-MM-DD using local parts
-        const toIsoDate = (s?: string) => {
-          if (!s) return '';
-          const d = new Date(s);
-          if (Number.isNaN(d.getTime())) return '';
-          const y = d.getFullYear();
-          const m = String(d.getMonth() + 1).padStart(2, '0');
-          const day = String(d.getDate()).padStart(2, '0');
-          return `${y}-${m}-${day}`;
-        };
-        setPlanStart(toIsoDate(p.startDate));
-        setPlanEnd(toIsoDate(p.endDate));
-        setSessionsPerDay(String(p.sessionsPerDay ?? 1));
-        if (Array.isArray(p.daysOfWeek)) {
-          const next = [false, false, false, false, false, false, false];
-          (p.daysOfWeek as number[]).forEach((idx) => {
-            if (idx >= 0 && idx <= 6) next[idx] = true;
-          });
-          setDaysOfWeek(next);
-        }
+        applyPlanForm(planFormFromPreset(p));
       } else {
         setExistingPlan(null);
+        applyPlanForm(getDefaultPlanForm());
       }
 
       const sessRes = await getPatientSessions(patientId, { limit: 20 });
@@ -258,13 +339,20 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
       const startTrim = planStart.trim();
       const endTrim = planEnd.trim();
 
-      if (!startTrim) {
-        setPlanError('กรุณาเลือกวันที่เริ่มต้นแผน');
-        setIsSaving(false);
-        return;
-      }
-      if (!endTrim) {
-        setPlanError('กรุณาเลือกวันที่สิ้นสุดแผน');
+      const emptyErrors = collectPlanFormEmptyErrors({
+        planStart: startTrim,
+        planEnd: endTrim,
+        sessionsPerDay: sessionsPerDay.trim(),
+        daysOfWeek,
+        targetFlexion: targetFlexion.trim(),
+        targetExtension: targetExtension.trim(),
+        speedLevel: speedLevel.trim(),
+        durationMinutes: durationMinutes.trim(),
+        targetForceN: targetForceN.trim(),
+      });
+      setPlanFieldErrors(emptyErrors);
+      if (hasAnyFieldError(emptyErrors)) {
+        setPlanError(null);
         setIsSaving(false);
         return;
       }
@@ -287,11 +375,6 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
       }
 
       const sessionsTrim = sessionsPerDay.trim();
-      if (!sessionsTrim) {
-        setPlanError('กรุณากรอกจำนวนครั้งต่อวัน');
-        setIsSaving(false);
-        return;
-      }
       const sessionsNum = Number(sessionsTrim);
       if (Number.isNaN(sessionsNum) || sessionsNum < 1 || sessionsNum > 3) {
         setPlanError('จำนวนครั้งต่อวันต้องอยู่ระหว่าง 1–3');
@@ -300,11 +383,6 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
       }
 
       const days = daysOfWeek.reduce<number[]>((acc, v, i) => (v ? acc.concat(i) : acc), []);
-      if (days.length === 0) {
-        setPlanError('กรุณาเลือกวันในสัปดาห์อย่างน้อย 1 วัน');
-        setIsSaving(false);
-        return;
-      }
       const allowed = getAllowedWeekdays(startTrim, endTrim);
       if (!days.some((d) => allowed[d])) {
         setPlanError('วันที่เลือกในสัปดาห์ไม่ตรงกับช่วงวันที่แผน');
@@ -313,11 +391,6 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
       }
 
       const flexionTrim = targetFlexion.trim();
-      if (!flexionTrim) {
-        setPlanError('กรุณากรอกองศา Flexion เป้าหมาย');
-        setIsSaving(false);
-        return;
-      }
       const flexionValue = Number(flexionTrim);
       if (Number.isNaN(flexionValue) || flexionValue < REALISTIC_LIMITS.flexion.min || flexionValue > REALISTIC_LIMITS.flexion.max) {
         setPlanError(`องศา Flexion ต้องอยู่ระหว่าง ${REALISTIC_LIMITS.flexion.min}–${REALISTIC_LIMITS.flexion.max}°`);
@@ -326,11 +399,6 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
       }
 
       const extensionTrim = targetExtension.trim();
-      if (extensionTrim === '') {
-        setPlanError('กรุณากรอกองศา Extension เป้าหมาย');
-        setIsSaving(false);
-        return;
-      }
       const extensionValue = Number(extensionTrim);
       if (Number.isNaN(extensionValue) || extensionValue < REALISTIC_LIMITS.extension.min || extensionValue > REALISTIC_LIMITS.extension.max) {
         setPlanError(`องศา Extension ต้องอยู่ระหว่าง ${REALISTIC_LIMITS.extension.min}–${REALISTIC_LIMITS.extension.max}°`);
@@ -339,11 +407,6 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
       }
 
       const speedTrim = speedLevel.trim();
-      if (!speedTrim) {
-        setPlanError('กรุณากรอกความเร็ว');
-        setIsSaving(false);
-        return;
-      }
       const speedValue = Number(speedTrim);
       if (Number.isNaN(speedValue) || speedValue < REALISTIC_LIMITS.speed.min || speedValue > REALISTIC_LIMITS.speed.max) {
         setPlanError(`ความเร็วต้องอยู่ระหว่าง ${REALISTIC_LIMITS.speed.min}–${REALISTIC_LIMITS.speed.max}`);
@@ -352,11 +415,6 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
       }
 
       const durationTrim = durationMinutes.trim();
-      if (!durationTrim) {
-        setPlanError('กรุณากรอกระยะเวลา (นาที)');
-        setIsSaving(false);
-        return;
-      }
       const durationNum = Number(durationTrim);
       if (Number.isNaN(durationNum) || durationNum < 1) {
         setPlanError('ระยะเวลาต้องอย่างน้อย 1 นาที');
@@ -365,11 +423,6 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
       }
 
       const forceTrim = targetForceN.trim();
-      if (!forceTrim) {
-        setPlanError('กรุณากรอกแรงต้านสูงสุด (N)');
-        setIsSaving(false);
-        return;
-      }
       const forceValue = Number(forceTrim);
       if (Number.isNaN(forceValue) || forceValue <= 0) {
         setPlanError('แรงต้านสูงสุด (N) ต้องมากกว่า 0');
@@ -378,6 +431,7 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
       }
 
       setPlanError(null);
+      setPlanFieldErrors({});
       const payload = {
         flexion: flexionValue,
         extension: extensionValue,
@@ -402,7 +456,12 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
       const sessRes = await getPatientSessions(patientId, { limit: 20 });
       if (sessRes.success && Array.isArray(sessRes.data)) setSessions(sessRes.data as any[]);
 
-      setExistingPlan(res.data ?? true);
+      const saved = (res.data ?? {}) as Record<string, unknown>;
+      setExistingPlan(saved);
+      applyPlanForm(planFormFromPreset(saved));
+      setPlanError(null);
+      setPlanFieldErrors({});
+      setShowRangePicker(false);
       setShowPlanModal(false);
       Alert.alert('บันทึกแผนการรักษา', 'บันทึกแผนการรักษาเรียบร้อย');
     } catch (err) {
@@ -425,16 +484,9 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
     setConfirmDeleteVisible(false);
     if (res.success) {
       setExistingPlan(null);
-      setPlanStart('');
-      setPlanEnd('');
-      setSessionsPerDay('1');
-      setDaysOfWeek([false, false, false, false, false, false, false]);
-      setTargetFlexion('120');
-      setTargetExtension('0');
-      setSpeedLevel('5');
-      setDurationMinutes('10');
-      setTargetForceN('70');
-      setUseWarmup(true);
+      applyPlanForm(getDefaultPlanForm());
+      setPlanError(null);
+      setPlanFieldErrors({});
     } else {
       Alert.alert('หยุดแผนการรักษาไม่สำเร็จ', res.error || 'ไม่สามารถหยุดแผนการรักษาได้');
     }
@@ -576,10 +628,15 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
   const planFormContent = (
     <>
       <View style={{ marginBottom: 8 }}>
-        <RequiredFieldLabel>ช่วงวันที่แผน (Plan range)</RequiredFieldLabel>
+        <RequiredFieldLabel hasError={planFieldErrors.planRange} style={styles.fieldLabel}>
+          ช่วงวันที่แผน (Plan range)
+        </RequiredFieldLabel>
         <Pressable
-          onPress={() => setShowRangePicker(true)}
-          style={[styles.input, { justifyContent: 'center', minHeight: 48 }]}
+          onPress={() => {
+            setShowRangePicker(true);
+            setPlanFieldErrors((e) => clearFieldError(e, 'planRange'));
+          }}
+          style={withRequiredFieldBorder([styles.input, { justifyContent: 'center', minHeight: 48 }], planFieldErrors.planRange)}
         >
           <Text style={{ color: planStart || planEnd ? DSColors.text.primary : DSColors.text.secondary }}>
             {formatRangeLabel(planStart, planEnd)}
@@ -589,7 +646,9 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
 
       <View style={{ flexDirection: isNarrow ? 'column' : 'row', gap: 8, alignItems: 'flex-start', marginBottom: 12 }}>
         <View style={isNarrow ? { width: '100%' } : { width: 160 }}>
-          <RequiredFieldLabel>จำนวนครั้งต่อวัน (Sessions / day)</RequiredFieldLabel>
+          <RequiredFieldLabel hasError={planFieldErrors.sessionsPerDay} style={styles.fieldLabel}>
+            จำนวนครั้งต่อวัน (Sessions / day)
+          </RequiredFieldLabel>
           <TextInput
             value={sessionsPerDay}
             onChangeText={(t) => {
@@ -598,15 +657,23 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
               const clamped = digits === '' ? '' : String(Math.min(3, Math.max(1, n)));
               setSessionsPerDay(clamped);
               setPlanError(null);
+              setPlanFieldErrors((e) => clearFieldError(e, 'sessionsPerDay'));
             }}
-            style={styles.input}
+            style={withRequiredFieldBorder(styles.input, planFieldErrors.sessionsPerDay)}
             keyboardType="numeric"
             maxLength={1}
           />
         </View>
         <View style={{ flex: 1 }}>
-          <RequiredFieldLabel style={{ marginBottom: 6 }}>วันในสัปดาห์ (Days of week)</RequiredFieldLabel>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+          <RequiredFieldLabel hasError={planFieldErrors.daysOfWeek} style={{ marginBottom: 6, ...styles.fieldLabel }}>
+            วันในสัปดาห์ (Days of week)
+          </RequiredFieldLabel>
+          <View
+            style={[
+              { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+              planFieldErrors.daysOfWeek && styles.weekdayRowError,
+            ]}
+          >
             {['Su','Mo','Tu','We','Th','Fr','Sa'].map((label, idx) => {
               const allowed = getAllowedWeekdays(planStart, planEnd)[idx];
               const isActive = daysOfWeek[idx];
@@ -619,6 +686,7 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
                     copy[idx] = !copy[idx];
                     setDaysOfWeek(copy);
                     setPlanError(null);
+                    setPlanFieldErrors((e) => clearFieldError(e, 'daysOfWeek'));
                   }}
                   disabled={!allowed}
                   style={[styles.weekdayChip, isActive && styles.weekdayChipActive, !allowed && styles.weekdayChipDisabled, { marginBottom: 6 }]}
@@ -636,29 +704,82 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
       <Text style={{ ...DSTypography.caption, color: DSColors.text.secondary, marginBottom: 6 }}>PRESCRIPTION (PHASE 1)</Text>
       <View style={{ flexDirection: isNarrow ? 'column' : 'row', gap: 8, marginBottom: 8 }}>
         <View style={{ flex: 1 }}>
-          <RequiredFieldLabel>องศา Flexion เป้าหมาย (°)</RequiredFieldLabel>
-          <TextInput value={targetFlexion} onChangeText={(v) => setTargetFlexion(clampNumber(v, REALISTIC_LIMITS.flexion.min, REALISTIC_LIMITS.flexion.max))} style={styles.input} keyboardType="numeric" maxLength={3} />
+          <RequiredFieldLabel hasError={planFieldErrors.targetFlexion} style={styles.fieldLabel}>
+            องศา Flexion เป้าหมาย (°)
+          </RequiredFieldLabel>
+          <TextInput
+            value={targetFlexion}
+            onChangeText={(v) => {
+              setTargetFlexion(clampNumber(v, REALISTIC_LIMITS.flexion.min, REALISTIC_LIMITS.flexion.max));
+              setPlanFieldErrors((e) => clearFieldError(e, 'targetFlexion'));
+            }}
+            style={withRequiredFieldBorder(styles.input, planFieldErrors.targetFlexion)}
+            keyboardType="numeric"
+            maxLength={3}
+          />
         </View>
         <View style={{ flex: 1 }}>
-          <RequiredFieldLabel>องศา Extension เป้าหมาย (°)</RequiredFieldLabel>
-          <TextInput value={targetExtension} onChangeText={(v) => setTargetExtension(clampNumber(v, REALISTIC_LIMITS.extension.min, REALISTIC_LIMITS.extension.max))} style={styles.input} keyboardType="numeric" maxLength={4} />
+          <RequiredFieldLabel hasError={planFieldErrors.targetExtension} style={styles.fieldLabel}>
+            องศา Extension เป้าหมาย (°)
+          </RequiredFieldLabel>
+          <TextInput
+            value={targetExtension}
+            onChangeText={(v) => {
+              setTargetExtension(clampNumber(v, REALISTIC_LIMITS.extension.min, REALISTIC_LIMITS.extension.max));
+              setPlanFieldErrors((e) => clearFieldError(e, 'targetExtension'));
+            }}
+            style={withRequiredFieldBorder(styles.input, planFieldErrors.targetExtension)}
+            keyboardType="numeric"
+            maxLength={4}
+          />
         </View>
       </View>
 
       <View style={{ flexDirection: isNarrow ? 'column' : 'row', gap: 8, marginBottom: 8 }}>
         <View style={{ flex: 1 }}>
-          <RequiredFieldLabel>ความเร็ว (1–10)</RequiredFieldLabel>
-          <TextInput value={speedLevel} onChangeText={(v) => setSpeedLevel(clampNumber(v, REALISTIC_LIMITS.speed.min, REALISTIC_LIMITS.speed.max))} style={styles.input} keyboardType="numeric" maxLength={2} />
+          <RequiredFieldLabel hasError={planFieldErrors.speedLevel} style={styles.fieldLabel}>
+            ความเร็ว (1–10)
+          </RequiredFieldLabel>
+          <TextInput
+            value={speedLevel}
+            onChangeText={(v) => {
+              setSpeedLevel(clampNumber(v, REALISTIC_LIMITS.speed.min, REALISTIC_LIMITS.speed.max));
+              setPlanFieldErrors((e) => clearFieldError(e, 'speedLevel'));
+            }}
+            style={withRequiredFieldBorder(styles.input, planFieldErrors.speedLevel)}
+            keyboardType="numeric"
+            maxLength={2}
+          />
         </View>
         <View style={{ flex: 1 }}>
-          <RequiredFieldLabel>ระยะเวลา (นาที)</RequiredFieldLabel>
-          <TextInput value={durationMinutes} onChangeText={setDurationMinutes} style={styles.input} keyboardType="numeric" />
+          <RequiredFieldLabel hasError={planFieldErrors.durationMinutes} style={styles.fieldLabel}>
+            ระยะเวลา (นาที)
+          </RequiredFieldLabel>
+          <TextInput
+            value={durationMinutes}
+            onChangeText={(v) => {
+              setDurationMinutes(v);
+              setPlanFieldErrors((e) => clearFieldError(e, 'durationMinutes'));
+            }}
+            style={withRequiredFieldBorder(styles.input, planFieldErrors.durationMinutes)}
+            keyboardType="numeric"
+          />
         </View>
       </View>
 
-      <RequiredFieldLabel>แรงต้านสูงสุด (N) — เพดาน Level 10</RequiredFieldLabel>
+      <RequiredFieldLabel hasError={planFieldErrors.targetForceN} style={styles.fieldLabel}>
+        แรงต้านสูงสุด (N) — เพดาน Level 10
+      </RequiredFieldLabel>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-        <TextInput value={targetForceN} onChangeText={setTargetForceN} style={[styles.input, { flex: 1 }]} keyboardType="numeric" />
+        <TextInput
+          value={targetForceN}
+          onChangeText={(v) => {
+            setTargetForceN(v);
+            setPlanFieldErrors((e) => clearFieldError(e, 'targetForceN'));
+          }}
+          style={withRequiredFieldBorder([styles.input, { flex: 1 }], planFieldErrors.targetForceN)}
+          keyboardType="numeric"
+        />
       </View>
       <Text style={{ ...DSTypography.caption, color: DSColors.text.secondary, marginBottom: 12 }}>
         ผู้ป่วยสามารถปรับเลเวลแรงได้ 1–10 ในระหว่างฝึก โดยแรงต่อเลเวล = {targetForceN ? (Number(targetForceN) / 10).toFixed(1) : '-'} N
@@ -668,7 +789,6 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
         <Switch value={useWarmup} onValueChange={setUseWarmup} />
         <Text style={{ marginLeft: 8, ...DSTypography.body, color: DSColors.text.primary }}>
           โหมดวอร์มอัพ (Warm-up)
-          <Text style={{ color: DSColors.danger }}> *</Text>
         </Text>
       </View>
 
@@ -721,7 +841,7 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
           <View style={styles.planCardHeader}>
             <Text style={styles.planCardTitle}>แผนการรักษาปัจจุบัน</Text>
             <View style={{ flexDirection: 'row', gap: 8 }}>
-              <Pressable onPress={() => { setPlanError(null); setShowPlanModal(true); }} style={styles.editChip}>
+              <Pressable onPress={openPlanModal} style={styles.editChip}>
                 <Text style={styles.editChipText}>แก้ไข</Text>
               </Pressable>
               <Pressable onPress={handleDeletePlan} style={styles.deactivateChip} disabled={isDeletingPlan}>
@@ -772,18 +892,18 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
         </View>
       ) : (
         // ── No Plan: Create Button ──
-        <Pressable onPress={() => { setPlanError(null); setShowPlanModal(true); }} style={styles.createPlanBtn}>
+        <Pressable onPress={openPlanModal} style={styles.createPlanBtn}>
           <Text style={styles.createPlanBtnText}>+ สร้างแผนการรักษา</Text>
         </Pressable>
       )}
 
       {/* ── Plan Form Modal ── */}
-      <Modal visible={showPlanModal} transparent animationType="slide" onRequestClose={() => setShowPlanModal(false)}>
+      <Modal visible={showPlanModal} transparent animationType="slide" onRequestClose={closePlanModal}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{existingPlan ? 'ปรับแผนการรักษา' : 'กำหนดแผนการรักษา'}</Text>
-              <Pressable onPress={() => setShowPlanModal(false)} style={{ padding: 8 }}>
+              <Pressable onPress={closePlanModal} style={{ padding: 8 }}>
                 <Text style={{ fontSize: 18, color: DSColors.text.secondary, fontWeight: '600' }}>✕</Text>
               </Pressable>
             </View>
@@ -793,7 +913,7 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
             </ScrollView>
 
             <View style={styles.modalFooter}>
-              <Pressable onPress={() => setShowPlanModal(false)} style={[styles.outlineButton, { flex: 1 }]}>
+              <Pressable onPress={closePlanModal} style={[styles.outlineButton, { flex: 1 }]}>
                 <Text style={[styles.outlineButtonText, { textAlign: 'center' }]}>ยกเลิก</Text>
               </Pressable>
               <Pressable
@@ -818,6 +938,7 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
           setPlanStart(startDate);
           setPlanEnd(endDate);
           setPlanError(null);
+          setPlanFieldErrors((e) => clearFieldError(e, 'planRange'));
           if (startDate || endDate) setShowRangePicker(false);
         }}
       />
@@ -1512,6 +1633,12 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     borderWidth: 1,
     borderColor: DSColors.border,
+  },
+  weekdayRowError: {
+    borderWidth: 2,
+    borderColor: DSColors.danger,
+    borderRadius: DSShape.radiusMd,
+    padding: 6,
   },
   weekdayChip: {
     paddingVertical: 6,

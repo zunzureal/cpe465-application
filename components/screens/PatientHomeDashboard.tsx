@@ -1189,28 +1189,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: DSColors.success,
-    gap: 8,
+    gap: 4,
     borderRadius: DSShape.radiusButton,
     paddingVertical: 10,
     paddingHorizontal: 24,
   },
   startSessionCtaActive: {
     backgroundColor: DSColors.primary,
-    gap: 8,
+    gap: 4,
     paddingVertical: 16,
     paddingHorizontal: 24,
   },
   startSessionCtaText: {
     ...DSTypography.bodyBold,
-  
     color: '#ffffff',
-    fontSize: 18,
+    fontSize: 16,
   },
   startSessionCtaDone: {
     backgroundColor: DSColors.success,
   },
   emptyStateCta: {
     width: '100%',
+    height: 54,
     marginTop: 4,
   },
 

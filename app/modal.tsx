@@ -32,12 +32,12 @@ export default function ModalScreen() {
   const placeholderColor = isDark ? '#4A5568' : '#A0AEC0';
 
   const fields: { label: string; placeholder: string; value: string; onChange: (v: string) => void }[] = [
-    { label: 'ชื่อแพทย์', placeholder: 'เช่น นพ.ธนา วัฒนกิจ', value: doctorName, onChange: setDoctorName },
-    { label: 'รหัสโปรแกรม', placeholder: 'เช่น PT-2403', value: programCode, onChange: setProgramCode },
-    { label: 'ตำแหน่งการรักษา', placeholder: 'เช่น ข้อเข่าซ้าย', value: targetArea, onChange: setTargetArea },
-    { label: 'ช่วงองศา', placeholder: 'เช่น 20° – 70°', value: angleRange, onChange: setAngleRange },
-    { label: 'ช่วงแรง', placeholder: 'เช่น 7 – 11 N', value: forceRange, onChange: setForceRange },
-    { label: 'ระยะเวลา', placeholder: 'เช่น 20 นาที', value: duration, onChange: setDuration },
+    { label: 'ชื่อแพทย์', placeholder: 'นพ.ธนา วัฒนกิจ', value: doctorName, onChange: setDoctorName },
+    { label: 'รหัสโปรแกรม', placeholder: 'PT-2403', value: programCode, onChange: setProgramCode },
+    { label: 'ตำแหน่งการรักษา', placeholder: 'ข้อเข่าซ้าย', value: targetArea, onChange: setTargetArea },
+    { label: 'ช่วงองศา', placeholder: '20° – 70°', value: angleRange, onChange: setAngleRange },
+    { label: 'ช่วงแรง', placeholder: '7 – 11 N', value: forceRange, onChange: setForceRange },
+    { label: 'ระยะเวลา', placeholder: '20 นาที', value: duration, onChange: setDuration },
   ];
 
   return (
