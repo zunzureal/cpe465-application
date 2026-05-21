@@ -8,40 +8,10 @@ import { useLocalSearchParams } from 'expo-router';
 import { DSColors, DSLayout, DSShape, DSShadowSoft, DSTypography } from '@/constants/design-system';
 import { useAuth } from '@/contexts/AuthContext';
 import { putPatientPreset, getDoctorPatient, getPatientPreset, getPatientSessions, deactivatePlan, type SessionResponse } from '@/services/apiClient';
+import { bangkokParts, toBangkokDateKey } from '@/utils/dateUtils';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import DateTimePicker, { useDefaultStyles, type DateType } from 'react-native-calendars-datepicker';
-
-type ChartPoint = {
-  x: number;
-  y: number;
-};
-
-function buildLinePath(points: ChartPoint[]) {
-  if (points.length === 0) return '';
-  if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
-
-  const commands: string[] = [`M ${points[0].x} ${points[0].y}`];
-  for (let i = 1; i < points.length; i += 1) {
-    const previous = points[i - 1];
-    const current = points[i];
-    const controlX = (previous.x + current.x) / 2;
-    commands.push(`C ${controlX} ${previous.y}, ${controlX} ${current.y}, ${current.x} ${current.y}`);
-  }
-  return commands.join(' ');
-}
-
-function buildAreaPath(points: ChartPoint[], baseY: number) {
-  if (points.length === 0) return '';
-  const linePath = buildLinePath(points);
-  const lastPoint = points[points.length - 1];
-  const firstPoint = points[0];
-  return `${linePath} L ${lastPoint.x} ${baseY} L ${firstPoint.x} ${baseY} Z`;
-}
-
-function formatChartValue(value: number) {
-  return String(Math.round(value));
-}
 
 const TARGET_LINE_COLOR = '#7DD3FC';
 const ACTUAL_LINE_COLOR = DSColors.primary;
@@ -117,7 +87,8 @@ function AndroidTabletProgressFallback({
       {recent.map((session, index) => {
         const actualValue = Number(session?.actualMaxFlexion) || 0;
         const sessionDate = new Date(session?.sessionDate);
-        const label = sessionDate.toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' });
+        const p = bangkokParts(sessionDate);
+        const label = `${p.month0 + 1}/${p.day}`;
         const actualWidth = Math.max(6, (actualValue / maxValue) * barWidth);
         const targetWidth = Math.max(6, (targetValue / maxValue) * barWidth);
 
@@ -171,6 +142,7 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
   const [targetForceN, setTargetForceN] = useState<string>('70');
   const [useWarmup, setUseWarmup] = useState<boolean>(true);
   const [sessions, setSessions] = useState<SessionResponse[]>([]);
+  const [selectedPeriod, setSelectedPeriod] = useState<'7d' | '30d' | 'all'>('7d');
   const [showPlanModal, setShowPlanModal] = useState(false);
   const [existingPlan, setExistingPlan] = useState<any>(null);
   const [isDeletingPlan, setIsDeletingPlan] = useState(false);
@@ -326,8 +298,11 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
         // forceLevel is the patient-side scaling ceiling. Doctor only sets targetForceN;
         // we always send 10 so the patient app interprets targetForceN as Level 10.
         forceLevel: 10,
-        startDate: planStart || undefined,
-        endDate: planEnd || undefined,
+        // Send startDate as start-of-day and endDate as end-of-day so that
+        // single-day ranges (start === end) cover the full day instead of
+        // collapsing to 00:00-00:00. Date strings are local YYYY-MM-DD.
+        startDate: planStart ? `${planStart}T00:00:00.000` : undefined,
+        endDate: planEnd ? `${planEnd}T23:59:59.999` : undefined,
         sessionsPerDay: Number(sessionsPerDay) || 1,
         daysOfWeek: days.length ? days : undefined,
       };
@@ -444,6 +419,11 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
               calendar="gregory"
               startDate={rangeStart as DateType}
               endDate={rangeEnd as DateType}
+              minDate={(() => {
+                const d = new Date();
+                d.setHours(0, 0, 0, 0);
+                return d;
+              })()}
               showOutsideDays
               onChange={({ startDate: nextStartDate, endDate: nextEndDate }: { startDate: DateType; endDate: DateType }) => {
                 // Debug log to inspect raw picker values and types
@@ -795,23 +775,74 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
         <View style={styles.chartCardHeader}>
           <View style={{ flex: 1 }}>
             <Text style={styles.chartCardTitle}>ความคืบหน้าการรักษา</Text>
-            <Text style={styles.chartCardSubtitle}>Target vs Actual Flexion · 7 sessions ล่าสุด</Text>
+            <Text style={styles.chartCardSubtitle}>Target vs Actual Flexion</Text>
           </View>
         </View>
+
+        {/* Period filter — matches patient programs.tsx */}
+        <View style={styles.periodRow}>
+          {(['7d', '30d', 'all'] as const).map((key) => {
+            const label = key === '7d' ? '7 วัน' : key === '30d' ? '30 วัน' : 'ทั้งหมด';
+            const active = selectedPeriod === key;
+            return (
+              <Pressable
+                key={key}
+                style={[styles.periodTab, active && styles.periodTabActive]}
+                onPress={() => setSelectedPeriod(key)}
+              >
+                <Text style={[styles.periodTabText, active && styles.periodTabTextActive]}>
+                  {label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
         {sessions.filter((s) => s.kind === 'session').length > 0 ? (
           (() => {
-            const sessionEntries = sessions.filter((s): s is Extract<SessionResponse, { kind: 'session' }> => s.kind === 'session');
-            const sortedSessions = sessionEntries.slice().sort((a, b) => new Date(a.sessionDate).getTime() - new Date(b.sessionDate).getTime());
-            const recent = sortedSessions.slice(-7);
-            const labels = recent.map((s) => new Date(s.sessionDate).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' }));
-            const actuals = recent.map((s) => Number(s.actualMaxFlexion) || 0);
-            const target = recent.map(() => Number(targetFlexion) || 0);
+            const allSessionEntries = sessions.filter((s): s is Extract<SessionResponse, { kind: 'session' }> => s.kind === 'session');
+
+            // Filter by selected period before aggregating.
+            const periodCutoff = selectedPeriod === 'all'
+              ? 0
+              : Date.now() - (selectedPeriod === '7d' ? 7 : 30) * 24 * 60 * 60 * 1000;
+            const sessionEntries = selectedPeriod === 'all'
+              ? allSessionEntries
+              : allSessionEntries.filter((s) => new Date(s.sessionDate).getTime() >= periodCutoff);
+
+            // Aggregate to one point per day (max flexion across that day's sessions).
+            // Format matches programs.tsx (patient): D/M labels, 10 days max.
+            const MAX_CHART_POINTS = 10;
+
+            // Group by Bangkok day so a Bangkok-evening session doesn't roll into
+            // the next UTC day on this dashboard.
+            const byDay = new Map<string, { ts: number; max: number; key: string }>();
+            sessionEntries.forEach((s) => {
+              const d = new Date(s.sessionDate);
+              const key = toBangkokDateKey(d);
+              const value = Number(s.actualMaxFlexion) || 0;
+              const existing = byDay.get(key);
+              if (!existing || value > existing.max) {
+                byDay.set(key, { ts: d.getTime(), max: Math.max(existing?.max ?? 0, value), key });
+              }
+            });
+            const dailyAsc = Array.from(byDay.values()).sort((a, b) => (a.key < b.key ? -1 : 1));
+            const recentDays = dailyAsc.slice(-MAX_CHART_POINTS);
+            const labels = recentDays.map((g) => {
+              const [, mm, dd] = g.key.split('-');
+              return `${Number(dd)}/${Number(mm)}`;
+            });
+            const actualValues = recentDays.map((g) => g.max);
+            const targetValues = recentDays.map(() => Number(targetFlexion) || 0);
+
             if (isAndroidTablet) {
+              const recent = recentDays.map((g) => ({
+                sessionDate: new Date(g.ts).toISOString(),
+                actualMaxFlexion: g.max,
+              }));
               return <AndroidTabletProgressFallback sessions={recent} targetFlexion={targetFlexion} />;
             }
 
-            const dataMax = Math.max(...actuals, ...target, 1);
-            const dataMin = Math.max(0, Math.min(...actuals, ...target) - 5);
             // Card has paddingHorizontal=12 (x2) + screen padding 20 (x2) + 1px border (x2)
             // = ~66px of horizontal chrome to subtract before computing the chart width.
             const cardChromeX = 66;
@@ -819,40 +850,29 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
               ? Math.max(260, Math.min(440, width - 24 - cardChromeX))
               : Math.max(260, Math.min(900, width - (isNarrow ? 32 : 160) - cardChromeX));
             const chartHeight = isCompactEmbedded ? 168 : isNarrow ? 176 : 180;
-            const paddingLeft = 34;
-            const paddingRight = 18;
-            const paddingTop = 16;
-            const paddingBottom = 34;
-            const innerWidth = chartWidth - paddingLeft - paddingRight;
-            const innerHeight = chartHeight - paddingTop - paddingBottom;
-            const range = Math.max(1, dataMax - dataMin);
+            const usableWidth = Math.max(260, Math.min(chartWidth, width - (isNarrow ? 24 : 160) - cardChromeX));
+            const chartRenderHeight = Math.max(160, chartHeight);
 
-            const mapPoint = (value: number, index: number, total: number): ChartPoint => ({
-              x: paddingLeft + (total <= 1 ? innerWidth / 2 : (index / (total - 1)) * innerWidth),
-              y: paddingTop + (dataMax - value) / range * innerHeight,
-            });
+            // Same dataset pattern as programs.tsx: two invisible series clamp the Y range,
+            // target as dashed line, actual as solid thick line.
+            // Dynamic Y range: ±10° padding around the actual data so the chart auto-fits.
+            const allValues = [...actualValues, ...targetValues].filter((v) => Number.isFinite(v));
+            const dataMin = allValues.length > 0 ? Math.min(...allValues) : 50;
+            const dataMax = allValues.length > 0 ? Math.max(...allValues) : 130;
+            const yFloor = Math.max(0, Math.floor(dataMin - 10));
+            const yCeiling = Math.ceil(dataMax + 10);
 
-            const actualPoints = actuals.map((value, index) => mapPoint(value, index, actuals.length));
-            const targetPoints = target.map((value, index) => mapPoint(value, index, target.length));
-            const actualPath = buildLinePath(actualPoints);
-            const targetPath = buildLinePath(targetPoints);
-            const actualArea = buildAreaPath(actualPoints, paddingTop + innerHeight);
-            const targetArea = buildAreaPath(targetPoints, paddingTop + innerHeight);
-
-            // Render a LineChart (react-native-chart-kit) using the same data shape as programs.tsx
             const chartData = {
               labels,
               datasets: [
-                { data: actuals, color: () => ACTUAL_LINE_COLOR, strokeWidth: 2 },
-                { data: target, color: () => TARGET_LINE_COLOR, strokeWidth: 2 },
+                { data: recentDays.map(() => yFloor),   color: (): string => 'rgba(0,0,0,0)', strokeWidth: 0 },
+                { data: recentDays.map(() => yCeiling), color: (): string => 'rgba(0,0,0,0)', strokeWidth: 0 },
+                { data: targetValues, color: (): string => TARGET_LINE_COLOR, strokeWidth: 2, strokeDashArray: [6, 4] },
+                { data: actualValues, color: (): string => ACTUAL_LINE_COLOR, strokeWidth: 3 },
               ],
-              
             };
 
             const cfg = makeChartConfig(DSColors.text.secondary, DSColors.borderLight);
-            const usableWidth = Math.max(260, Math.min(chartWidth, width - (isNarrow ? 24 : 160) - cardChromeX));
-
-            const chartRenderHeight = Math.max(160, chartHeight);
 
             return (
               <View style={{ width: '100%', alignItems: 'center' }}>
@@ -862,24 +882,23 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
                     width={usableWidth}
                     height={chartRenderHeight}
                     chartConfig={cfg}
-                    bezier
                     withDots
-                    withShadow
                     withInnerLines
-                    withOuterLines={false}
+                    withOuterLines
                     style={{ borderRadius: 12, overflow: 'hidden' }}
                     formatYLabel={(v) => `${Math.round(Number(v))}°`}
                     fromZero={false}
                     yLabelsOffset={8}
+                    segments={5}
                   />
                   <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 16, marginTop: 8 }}>
                     <View style={styles.androidTabletLegendItem}>
-                      <View style={[styles.androidTabletLegendDot, { backgroundColor: ACTUAL_LINE_COLOR }]} />
-                      <Text style={styles.androidTabletLegendText}>Actual Flexion</Text>
+                      <View style={[styles.androidTabletLegendDot, { backgroundColor: TARGET_LINE_COLOR }]} />
+                      <Text style={styles.androidTabletLegendText}>เป้าหมายแพทย์</Text>
                     </View>
                     <View style={styles.androidTabletLegendItem}>
-                      <View style={[styles.androidTabletLegendDot, { backgroundColor: TARGET_LINE_COLOR }]} />
-                      <Text style={styles.androidTabletLegendText}>Target Flexion</Text>
+                      <View style={[styles.androidTabletLegendDot, { backgroundColor: ACTUAL_LINE_COLOR }]} />
+                      <Text style={styles.androidTabletLegendText}>ที่ทำได้จริง</Text>
                     </View>
                   </View>
                 </View>
@@ -925,7 +944,7 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
                       <Ionicons name="calendar-outline" size={18} color={DSColors.text.secondary} />
                       <Text style={styles.sessionItemLabel}>วันที่</Text>
                     </View>
-                    <Text style={styles.sessionItemValue}>{new Date(item.sessionDate).toLocaleDateString()}</Text>
+                    <Text style={styles.sessionItemValue}>{new Date(item.sessionDate).toLocaleDateString('th-TH', { timeZone: 'Asia/Bangkok' })}</Text>
                   </View>
                   <View style={[styles.sessionItemRow, { borderBottomWidth: 0 }]}>
                     <View style={styles.sessionItemLeft}>
@@ -946,7 +965,7 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
                     <Ionicons name="time-outline" size={18} color={DSColors.text.secondary} />
                     <Text style={styles.sessionItemLabel}>เวลา</Text>
                   </View>
-                  <Text style={styles.sessionItemValue}>{new Date(item.sessionDate).toLocaleString()}</Text>
+                  <Text style={styles.sessionItemValue}>{new Date(item.sessionDate).toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}</Text>
                 </View>
                 <View style={styles.sessionItemRow}>
                   <View style={styles.sessionItemLeft}>
@@ -1584,5 +1603,30 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 520,
     alignSelf: 'center',
+  },
+  periodRow: {
+    flexDirection: 'row',
+    backgroundColor: DSColors.background,
+    borderRadius: DSShape.radiusChip,
+    padding: 4,
+    marginTop: 8,
+    marginBottom: 12,
+    gap: 4,
+  },
+  periodTab: {
+    flex: 1,
+    paddingVertical: 8,
+    alignItems: 'center',
+    borderRadius: DSShape.radiusChip - 2,
+  },
+  periodTabActive: {
+    backgroundColor: DSColors.primary,
+  },
+  periodTabText: {
+    ...DSTypography.captionBold,
+    color: DSColors.text.secondary,
+  },
+  periodTabTextActive: {
+    color: DSColors.text.inverse,
   },
 });

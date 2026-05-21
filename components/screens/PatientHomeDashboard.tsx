@@ -6,8 +6,8 @@
  */
 
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -39,6 +39,14 @@ import {
   type SessionResponse,
   type TodayStatsResponse,
 } from '@/services/apiClient';
+import {
+  bangkokKeyFromParts,
+  bangkokParts,
+  daysInBangkokMonth,
+  firstDayWeekdayBangkok,
+  toBangkokDateKey,
+  todayBangkokKey,
+} from '@/utils/dateUtils';
 
 // MVP only treats knees. Hardcode for now; later swap for plan.bodyPart from API.
 const BODY_PART_TH = 'เข่าขวา';
@@ -73,9 +81,8 @@ const THAI_MONTHS = [
 ];
 const DAY_HEADERS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
 
-function toDateKey(date: Date): string {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
+// All date keys in this file are YYYY-MM-DD in Asia/Bangkok timezone.
+const toDateKey = toBangkokDateKey;
 
 function buildSessionCountsByDate(sessions: SessionResponse[]): Record<string, number> {
   return sessions.reduce<Record<string, number>>((acc, session) => {
@@ -86,17 +93,32 @@ function buildSessionCountsByDate(sessions: SessionResponse[]): Record<string, n
   }, {});
 }
 
+function isSessionSuccess(session: Extract<SessionResponse, { kind: 'session' }>): boolean {
+  // Accept both `sessionStatus` and `status` fields from backend, case-insensitive.
+  const stored = String(session.sessionStatus ?? session.status ?? '').toUpperCase();
+  if (stored === 'SUCCESS') return true;
+  // Fallback: treat as success when actual flexion meets/exceeds the plan target.
+  const achieved = Number(session.actualMaxFlexion);
+  const target = Number(session.plan?.targetFlexion);
+  if (Number.isFinite(achieved) && Number.isFinite(target) && target > 0 && achieved >= target) {
+    return true;
+  }
+  return false;
+}
+
 function buildSessionStatusesByDate(sessions: SessionResponse[]): Record<string, SessionStatus[]> {
   const acc: Record<string, SessionStatus[]> = {};
-  // First pass: collect SUCCESS markers from real session entries
+  // First pass: real session entries — SUCCESS if criteria met, otherwise MISSED.
+  // Recording every session entry (not just successes) ensures the calendar shows
+  // a dot for days where the user attempted a session, even if it didn't reach target.
   sessions.forEach((session) => {
-    if (session.kind === 'session' && session.sessionStatus === 'SUCCESS') {
+    if (session.kind === 'session') {
       const key = toDateKey(new Date(session.sessionDate));
       if (!acc[key]) acc[key] = [];
-      acc[key].push('SUCCESS');
+      acc[key].push(isSessionSuccess(session) ? 'SUCCESS' : 'MISSED');
     }
   });
-  // Second pass: add MISSED only when day has no SUCCESS (SUCCESS wins for the same day)
+  // Second pass: synthesize MISSED for days that had no session entries at all.
   sessions.forEach((session) => {
     if (session.kind === 'missed') {
       const key = toDateKey(new Date(session.sessionDate));
@@ -111,9 +133,11 @@ function buildSessionStatusesByDate(sessions: SessionResponse[]): Record<string,
 
 interface PlanSchedule {
   active: boolean;
-  startDate?: Date;
-  endDate?: Date;
-  daysOfWeek?: number[]; // 0=Sun..6=Sat
+  /** YYYY-MM-DD (Bangkok) inclusive */
+  startDateKey?: string;
+  /** YYYY-MM-DD (Bangkok) inclusive */
+  endDateKey?: string;
+  daysOfWeek?: number[]; // 0=Sun..6=Sat (Bangkok weekday)
   sessionsPerDay: number;
 }
 
@@ -122,28 +146,30 @@ function buildWeeklyPlanFromCounts(
   sessionStatusesByDate: Record<string, SessionStatus[]>,
   schedule: PlanSchedule,
 ): Record<string, DayPlan> {
-  const today = new Date();
-  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  const dayOfWeek = today.getDay(); // 0=Sun
+  // Anchor to Bangkok day. Build Monday→Sunday of the current Bangkok week.
+  const todayKey = todayBangkokKey();
+  const todayBkk = bangkokParts(new Date());
+  const dayOfWeek = todayBkk.weekday; // 0=Sun
   const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-  const monday = new Date(today);
-  monday.setDate(today.getDate() + mondayOffset);
+  // Use UTC arithmetic on a midnight-Bangkok instant to safely walk days.
+  const mondayInstant = new Date(`${todayKey}T00:00:00+07:00`);
+  mondayInstant.setUTCDate(mondayInstant.getUTCDate() + mondayOffset);
 
-  const { active, startDate, endDate, daysOfWeek, sessionsPerDay } = schedule;
+  const { active, startDateKey, endDateKey, daysOfWeek, sessionsPerDay } = schedule;
 
   return Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(monday);
-    d.setDate(monday.getDate() + i);
-    const dStart = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-    const key = toDateKey(d);
+    const dInstant = new Date(mondayInstant.getTime());
+    dInstant.setUTCDate(mondayInstant.getUTCDate() + i);
+    const key = toBangkokDateKey(dInstant);
+    const dParts = bangkokParts(dInstant);
     const completed = sessionCountsByDate[key] ?? 0;
 
     const withinRange =
-      (!startDate || dStart >= startDate) &&
-      (!endDate || dStart <= endDate);
+      (!startDateKey || key >= startDateKey) &&
+      (!endDateKey || key <= endDateKey);
     const matchesDayOfWeek =
-      !daysOfWeek || daysOfWeek.length === 0 || daysOfWeek.includes(d.getDay());
-    const isFutureOrToday = dStart >= todayStart;
+      !daysOfWeek || daysOfWeek.length === 0 || daysOfWeek.includes(dParts.weekday);
+    const isFutureOrToday = key >= todayKey;
     // "scheduled" reflects the plan only — having a non-SUCCESS session log
     // on a day shouldn't make that day appear as planned.
     const scheduled = active && withinRange && matchesDayOfWeek && isFutureOrToday;
@@ -164,24 +190,43 @@ function buildWeeklyPlanFromCounts(
 
 interface CalendarWidgetProps {
   sessionStatusesByDate: Record<string, SessionStatus[]>;
+  sessionsPerDay: number;
+  schedule: PlanSchedule;
 }
 
-function CalendarWidget({ sessionStatusesByDate }: CalendarWidgetProps) {
-  const today = new Date();
-  const [display, setDisplay] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
+function CalendarWidget({ sessionStatusesByDate, sessionsPerDay, schedule }: CalendarWidgetProps) {
+  // Anchor "today" and grid math to Bangkok timezone.
+  const todayBkk = bangkokParts(new Date());
+  const todayKey = todayBangkokKey();
+  const [display, setDisplay] = useState<{ year: number; month0: number }>({
+    year: todayBkk.year,
+    month0: todayBkk.month0,
+  });
 
-  const year = display.getFullYear();
-  const month = display.getMonth();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const firstDayOfWeek = new Date(year, month, 1).getDay();
+  const year = display.year;
+  const month = display.month0;
+  const daysInMonth = daysInBangkokMonth(year, month);
+  const firstDayOfWeek = firstDayWeekdayBangkok(year, month);
 
-  const dateKey = (d: number) =>
-    `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  const dateKey = (d: number) => bangkokKeyFromParts(year, month, d);
 
   const getStatuses = (d: number) => sessionStatusesByDate[dateKey(d)] ?? [];
   const isToday = (d: number) =>
-    today.getFullYear() === year && today.getMonth() === month && today.getDate() === d;
-  const isFuture = (d: number) => new Date(year, month, d) > today;
+    todayBkk.year === year && todayBkk.month0 === month && todayBkk.day === d;
+  const isFuture = (d: number) => dateKey(d) > todayKey;
+  // Mirror WeeklyPlanStrip semantics: a day is "scheduled" when the plan is
+  // active, the date is in range, and the weekday matches.
+  const isScheduled = (d: number) => {
+    if (!schedule.active) return false;
+    const key = dateKey(d);
+    if (schedule.startDateKey && key < schedule.startDateKey) return false;
+    if (schedule.endDateKey && key > schedule.endDateKey) return false;
+    if (schedule.daysOfWeek && schedule.daysOfWeek.length > 0) {
+      const weekday = new Date(`${key}T00:00:00+07:00`).getUTCDay();
+      if (!schedule.daysOfWeek.includes(weekday)) return false;
+    }
+    return true;
+  };
   // Summary counts for the month header
   const daysWithSessions = Array.from({ length: daysInMonth }, (_, i) => i + 1)
     .filter(d => getStatuses(d).length > 0).length;
@@ -199,8 +244,14 @@ function CalendarWidget({ sessionStatusesByDate }: CalendarWidgetProps) {
     rows.push(flatCells.slice(i, i + 7));
   }
 
-  const prevMonth = () => setDisplay(new Date(year, month - 1, 1));
-  const nextMonth = () => setDisplay(new Date(year, month + 1, 1));
+  const prevMonth = () => {
+    const m = month - 1;
+    setDisplay(m < 0 ? { year: year - 1, month0: 11 } : { year, month0: m });
+  };
+  const nextMonth = () => {
+    const m = month + 1;
+    setDisplay(m > 11 ? { year: year + 1, month0: 0 } : { year, month0: m });
+  };
 
   const renderDay = (d: number | null, colIdx: number) => {
     if (!d) return <View key={`e-${colIdx}`} style={calStyles.cell} />;
@@ -208,12 +259,18 @@ function CalendarWidget({ sessionStatusesByDate }: CalendarWidgetProps) {
     const statuses = getStatuses(d);
     const todayFlag = isToday(d);
     const future = isFuture(d);
+    const scheduled = isScheduled(d);
 
     const numColor = todayFlag
       ? '#FFFFFF'
       : future
       ? DSColors.text.secondary
       : DSColors.secondary;
+
+    // Match WeeklyPlanStrip: show pips when day has logged sessions OR is a
+    // scheduled (planned) day. Lets today render empty pips even before any
+    // session entry has been logged.
+    const showPips = !future && (statuses.length > 0 || scheduled);
 
     return (
       <View key={d} style={[calStyles.cell, todayFlag && calStyles.cellToday]}>
@@ -228,19 +285,15 @@ function CalendarWidget({ sessionStatusesByDate }: CalendarWidgetProps) {
           </Text>
         </View>
 
-        {/* Status: dots only when sessions exist; otherwise empty placeholder */}
-        {!future && statuses.length > 0 ? (
+        {/* Status: dots only when sessions exist or day is scheduled */}
+        {showPips ? (
           <View style={calStyles.dotsRow}>
-            {Array.from({ length: SESSIONS_PER_DAY }, (_, i) => (
+            {Array.from({ length: sessionsPerDay }, (_, i) => (
               <View
                 key={i}
                 style={[
                   calStyles.dot,
-                  statuses[i] === 'SUCCESS'
-                    ? calStyles.dotDone
-                    : statuses[i] === 'MISSED'
-                    ? calStyles.dotMissed
-                    : calStyles.dotEmpty,
+                  statuses[i] === 'SUCCESS' ? calStyles.dotDone : calStyles.dotEmpty,
                 ]}
               />
             ))}
@@ -294,15 +347,15 @@ function CalendarWidget({ sessionStatusesByDate }: CalendarWidgetProps) {
       <View style={calStyles.legend}>
         <View style={calStyles.legendItem}>
           <View style={calStyles.legendDotGroup}>
-            {[0,1,2].map(i => <View key={i} style={[calStyles.dot, calStyles.dotDone]} />)}
+            {[0].map(i => <View key={i} style={[calStyles.dot, calStyles.dotDone]} />)}
           </View>
-          <Text style={calStyles.legendText}>ครบแล้ว</Text>
+          <Text style={calStyles.legendText}>ทำแล้ว</Text>
         </View>
         <View style={calStyles.legendItem}>
           <View style={calStyles.legendDotGroup}>
-            <View style={[calStyles.dot, calStyles.dotMissed]} />
+            {[0].map(i => <View key={i} style={[calStyles.dot, calStyles.dotEmpty]} />)}
           </View>
-          <Text style={calStyles.legendText}>ขาด</Text>
+          <Text style={calStyles.legendText}>ยังไม่ทำ</Text>
         </View>
         <View style={calStyles.legendItem}>
           <View style={[calStyles.dayNumWrap, calStyles.dayNumWrapToday, { width: 18, height: 18, borderRadius: 9 }]} />
@@ -325,23 +378,30 @@ function WeeklyPlanStrip({
   weekPlan: Record<string, DayPlan>;
   sessionsPerDay: number;
 }) {
-  const today = new Date();
-  const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-
-  // Build Mon–Sun of current week (week starts Mon)
-  const dayOfWeek = today.getDay(); // 0=Sun
+  // Anchor week math to Bangkok day to stay consistent across timezones.
+  const todayKey = todayBangkokKey();
+  const todayBkk = bangkokParts(new Date());
+  const dayOfWeek = todayBkk.weekday; // 0=Sun
   const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
-  const monday = new Date(today);
-  monday.setDate(today.getDate() + mondayOffset);
+  const mondayInstant = new Date(`${todayKey}T00:00:00+07:00`);
+  mondayInstant.setUTCDate(mondayInstant.getUTCDate() + mondayOffset);
 
   const days = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(monday);
-    d.setDate(monday.getDate() + i);
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const dInstant = new Date(mondayInstant.getTime());
+    dInstant.setUTCDate(mondayInstant.getUTCDate() + i);
+    const key = toBangkokDateKey(dInstant);
+    const parts = bangkokParts(dInstant);
     const isToday = key === todayKey;
-    const isFuture = d > today;
+    const isFuture = key > todayKey;
     const plan = weekPlan[key] ?? { scheduled: false, sessionsCompleted: 0, sessionStatuses: [] };
-    return { d, key, isToday, isFuture, plan, dayName: WEEK_DAY_SHORT[d.getDay()] };
+    return {
+      day: parts.day,
+      key,
+      isToday,
+      isFuture,
+      plan,
+      dayName: WEEK_DAY_SHORT[parts.weekday],
+    };
   });
 
   return (
@@ -351,7 +411,7 @@ function WeeklyPlanStrip({
         <Text style={weekStyles.title}>แผนสัปดาห์นี้</Text>
       </View>
       <View style={weekStyles.strip}>
-        {days.map(({ d, key, isToday, isFuture, plan, dayName }) => {
+        {days.map(({ day, key, isToday, isFuture, plan, dayName }) => {
           return (
             <View
               key={key}
@@ -372,7 +432,7 @@ function WeeklyPlanStrip({
                   isToday && weekStyles.dateNumToday,
                   !isToday && isFuture && weekStyles.dateNumFuture,
                 ]}>
-                  {d.getDate()}
+                  {day}
                 </Text>
               </View>
 
@@ -392,11 +452,7 @@ function WeeklyPlanStrip({
                         key={i}
                         style={[
                           weekStyles.pip,
-                          status === 'SUCCESS'
-                            ? weekStyles.pipDone
-                            : status === 'MISSED'
-                            ? weekStyles.pipMissed
-                            : weekStyles.pipEmpty,
+                          status === 'SUCCESS' ? weekStyles.pipDone : weekStyles.pipEmpty,
                         ]}
                       />
                     );
@@ -420,12 +476,12 @@ function WeeklyPlanStrip({
           <Text style={weekStyles.legendText}>ทำแล้ว</Text>
         </View>
         <View style={weekStyles.legendItem}>
-          <View style={[weekStyles.pip, weekStyles.pipMissed]} />
-          <Text style={weekStyles.legendText}>ขาด</Text>
-        </View>
-        <View style={weekStyles.legendItem}>
           <View style={[weekStyles.pip, weekStyles.pipPlanned]} />
           <Text style={weekStyles.legendText}>มีแผน</Text>
+        </View>
+        <View style={weekStyles.legendItem}>
+          <View style={[weekStyles.pip, weekStyles.pipEmpty]} />
+          <Text style={weekStyles.legendText}>ยังไม่ทำ</Text>
         </View>
       </View>
 
@@ -472,9 +528,16 @@ export function PatientHomeDashboard() {
   const [sessionCountsByDate, setSessionCountsByDate] = useState<Record<string, number>>({});
   const [sessionStatusesByDate, setSessionStatusesByDate] = useState<Record<string, SessionStatus[]>>({});
   const [weeklyPlan, setWeeklyPlan] = useState<Record<string, DayPlan>>({});
+  const [planSchedule, setPlanSchedule] = useState<PlanSchedule>({
+    active: false,
+    sessionsPerDay: SESSIONS_PER_DAY,
+  });
   const { patientId, patientName, identifier } = useAuth();
 
-  useEffect(() => {
+  // Refetch on focus so returning from /therapy-session refreshes today's pips
+  // and counts. Tab stacks keep the component mounted, so a plain useEffect
+  // with [patientId] wouldn't re-run after a session is submitted.
+  useFocusEffect(useCallback(() => {
     if (!patientId) {
       setPlanState('noPlan');
       setSessionCountsByDate({});
@@ -495,17 +558,8 @@ export function PatientHomeDashboard() {
       .then(([presetResponse, statsResponse, sessionsResponse]) => {
         if (cancelled) return;
 
-        if (!presetResponse.success) {
-          setPlanState('noPlan');
-          setSessionCountsByDate({});
-          setSessionStatusesByDate({});
-          setWeeklyPlan({});
-          return;
-        }
-
-        const preset = presetResponse.data;
-        const stats = statsResponse.success ? (statsResponse.data as TodayStatsResponse) : null;
-
+        // History (counts/statuses) is independent of the current preset — keep
+        // showing past sessions even when there's no active prescription.
         const counts = sessionsResponse.success && sessionsResponse.data
           ? buildSessionCountsByDate(sessionsResponse.data)
           : {};
@@ -515,40 +569,65 @@ export function PatientHomeDashboard() {
         setSessionCountsByDate(counts);
         setSessionStatusesByDate(statuses);
 
+        // Fallback sessionsPerDay derived from the most recent session entry's plan —
+        // used when the active preset is missing (e.g. last plan COMPLETED).
+        const stats = statsResponse.success ? (statsResponse.data as TodayStatsResponse) : null;
+        const sessionsPerDayFromHistory = sessionsResponse.success && sessionsResponse.data
+          ? sessionsResponse.data.find((s) => s.plan?.sessionsPerDay)?.plan?.sessionsPerDay
+          : undefined;
+        const fallbackSessionsPerDay =
+          sessionsPerDayFromHistory ?? stats?.totalSessionsTarget ?? SESSIONS_PER_DAY;
+
+        if (!presetResponse.success) {
+          setPlanState('noPlan');
+          setTodayPlan(null);
+          setPlanSchedule({ active: false, sessionsPerDay: fallbackSessionsPerDay });
+          setWeeklyPlan(
+            buildWeeklyPlanFromCounts(counts, statuses, {
+              active: false,
+              sessionsPerDay: fallbackSessionsPerDay,
+            }),
+          );
+          return;
+        }
+
+        const preset = presetResponse.data;
+
         const presetStatus = String(preset?.status ?? '').toUpperCase();
-        const parseDate = (s?: string): Date | undefined => {
+        // Plan date range is compared as Bangkok-day strings (YYYY-MM-DD) to avoid
+        // timezone ambiguity when the backend returns ISO instants like "...T00:00:00.000Z".
+        const toKey = (s?: string): string | undefined => {
           if (!s) return undefined;
-          const d = new Date(s);
-          if (Number.isNaN(d.getTime())) return undefined;
-          return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+          const key = toBangkokDateKey(s);
+          return key || undefined;
         };
         const isActive = ['ACTIVE', 'IN_PROGRESS'].includes(presetStatus);
-        const startDate = parseDate(preset?.startDate);
-        const endDate = parseDate(preset?.endDate);
+        const startDateKey = toKey(preset?.startDate);
+        const endDateKey = toKey(preset?.endDate);
         const daysOfWeek = preset?.daysOfWeek;
 
-        // Check whether today is actually a scheduled day for this preset.
-        const now = new Date();
-        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        // Check whether today (Bangkok) is actually a scheduled day for this preset.
+        const todayKeyForSchedule = todayBangkokKey();
+        const todayWeekdayBkk = bangkokParts(new Date()).weekday;
         const withinRangeToday =
-          (!startDate || todayStart >= startDate) &&
-          (!endDate || todayStart <= endDate);
+          (!startDateKey || todayKeyForSchedule >= startDateKey) &&
+          (!endDateKey || todayKeyForSchedule <= endDateKey);
         const matchesDayOfWeekToday =
-          !daysOfWeek || daysOfWeek.length === 0 || daysOfWeek.includes(now.getDay());
+          !daysOfWeek || daysOfWeek.length === 0 || daysOfWeek.includes(todayWeekdayBkk);
         const todayIsScheduled = isActive && withinRangeToday && matchesDayOfWeekToday;
 
         const sessionsPerDay =
           preset?.sessionsPerDay ?? stats?.totalSessionsTarget ?? SESSIONS_PER_DAY;
 
-        setWeeklyPlan(
-          buildWeeklyPlanFromCounts(counts, statuses, {
-            active: isActive,
-            startDate,
-            endDate,
-            daysOfWeek,
-            sessionsPerDay,
-          }),
-        );
+        const schedule: PlanSchedule = {
+          active: isActive,
+          startDateKey,
+          endDateKey,
+          daysOfWeek,
+          sessionsPerDay,
+        };
+        setPlanSchedule(schedule);
+        setWeeklyPlan(buildWeeklyPlanFromCounts(counts, statuses, schedule));
 
         if (!todayIsScheduled) {
           // Plan exists but today isn't in the schedule — treat like noPlan for the hero card.
@@ -557,10 +636,20 @@ export function PatientHomeDashboard() {
           return;
         }
 
-        // today-stats is the authoritative source for session progress.
+        // Count today's completed sessions from the sessions list filtered by
+        // Bangkok day — frontend-authoritative to avoid backend timezone drift.
+        // `todayStats` is used only as a fallback when the list is missing.
+        const todayKey = todayBangkokKey();
+        const todaySessionsFromList = sessionsResponse.success && sessionsResponse.data
+          ? sessionsResponse.data.filter(
+              (s) => s.kind === 'session' && toBangkokDateKey(s.sessionDate) === todayKey,
+            ).length
+          : 0;
         const todaySessionsPerDay =
-          stats?.totalSessionsTarget ?? preset?.sessionsPerDay ?? SESSIONS_PER_DAY;
-        const todaySessionsCompleted = stats?.sessionsCompleted ?? 0;
+          preset?.sessionsPerDay ?? stats?.totalSessionsTarget ?? SESSIONS_PER_DAY;
+        const todaySessionsCompleted = sessionsResponse.success
+          ? todaySessionsFromList
+          : (stats?.sessionsCompleted ?? 0);
 
         setTodayPlan({
           targetFlexion: Number(preset?.targetFlexion ?? 90),
@@ -584,7 +673,7 @@ export function PatientHomeDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [patientId]);
+  }, [patientId]));
 
   const renderPlanCard = () => {
     if (planState === 'loading') {
@@ -607,12 +696,14 @@ export function PatientHomeDashboard() {
           </Text>
           <Text style={styles.emptySub}>No prescription for today</Text>
           <Pressable
-            style={({ pressed }) => [styles.manualBigBtn, pressed && { opacity: 0.88 }]}
+            style={[styles.startSessionCta, styles.startSessionCtaActive, styles.emptyStateCta]}
+            android_ripple={{ color: 'rgba(255,255,255,0.2)' }}
             onPress={() => startMockConnection(() => router.push('/manual-setup'))}
+            accessibilityRole="button"
             accessibilityLabel="เข้าสู่โหมดฝึกอิสระ"
           >
-            <Ionicons name="play-circle" size={28} color={DSColors.text.inverse} />
-            <Text style={styles.manualBigBtnText}>เข้าสู่โหมดฝึกอิสระ</Text>
+            <Text style={styles.startSessionCtaText}>เข้าสู่โหมดฝึกอิสระ</Text>
+            <Ionicons name="chevron-forward" size={22} color="#FFFFFF" />
           </Pressable>
         </View>
       );
@@ -622,6 +713,11 @@ export function PatientHomeDashboard() {
     const plan = todayPlan!;
     const nextSession = plan.sessionsCompletedToday + 1;
     const allDone = plan.sessionsCompletedToday >= plan.sessionsPerDay;
+    console.log('[PatientHomeDashboard] render plan card', {
+      sessionsCompletedToday: plan.sessionsCompletedToday,
+      sessionsPerDay: plan.sessionsPerDay,
+      allDone,
+    });
 
     return (
       <View
@@ -739,7 +835,7 @@ export function PatientHomeDashboard() {
         <View style={[styles.card, DSShadow]}>
           <WeeklyPlanStrip
             weekPlan={weeklyPlan}
-            sessionsPerDay={todayPlan?.sessionsPerDay ?? SESSIONS_PER_DAY}
+            sessionsPerDay={planSchedule.sessionsPerDay}
           />
         </View>
 
@@ -747,7 +843,11 @@ export function PatientHomeDashboard() {
         <View style={[styles.card, DSShadow]}>
           <Text style={styles.cardTitle}>ความคืบหน้าการทำกายภาพ</Text>
           <Text style={styles.cardSubtitle}>ปฏิทินแสดงวันที่ทำกายภาพเรียบร้อยแล้ว</Text>
-          <CalendarWidget sessionStatusesByDate={sessionStatusesByDate} />
+          <CalendarWidget
+            sessionStatusesByDate={sessionStatusesByDate}
+            sessionsPerDay={planSchedule.sessionsPerDay}
+            schedule={planSchedule}
+          />
         </View>
 
         <View style={styles.bottomSpacer} />
@@ -867,10 +967,6 @@ const calStyles = StyleSheet.create({
   },
   dotEmpty: {
     backgroundColor: '#E5E7EB',
-  },
-  dotMissed: {
-    backgroundColor: DSColors.danger,
-    opacity: 0.7,
   },
   legend: {
     flexDirection: 'row',
@@ -1112,6 +1208,10 @@ const styles = StyleSheet.create({
   startSessionCtaDone: {
     backgroundColor: DSColors.success,
   },
+  emptyStateCta: {
+    width: '100%',
+    marginTop: 4,
+  },
 
   // ── Calendar card ─────────────────────────────────────────────────────────
   card: {
@@ -1220,10 +1320,6 @@ const weekStyles = StyleSheet.create({
     backgroundColor: DSColors.primary + '50',
     borderWidth: 1,
     borderColor: DSColors.primary,
-  },
-  pipMissed: {
-    backgroundColor: DSColors.danger,
-    opacity: 0.7,
   },
   todayLabel: {
     fontSize: 9,

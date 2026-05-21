@@ -14,6 +14,7 @@ const AnyLineChart = LineChart as any;
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { getPatientSessions, type SessionResponse } from '@/services/apiClient';
+import { bangkokParts } from '@/utils/dateUtils';
 import {
   DSColors,
   DSLayout,
@@ -113,12 +114,15 @@ function transformApiSessions(apiSessions: SessionResponse[]): {
 
   apiSessions.forEach((apiSession) => {
     const sessionDate = new Date(apiSession.sessionDate);
+    // Compute calendar day/weekday in Bangkok timezone (not device local).
+    const parts = bangkokParts(sessionDate);
     const dateStr = sessionDate.toLocaleDateString('th-TH', {
       year: 'numeric',
       month: 'long',
       day: 'numeric',
+      timeZone: 'Asia/Bangkok',
     });
-    const dayLabel = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'][sessionDate.getDay()];
+    const dayLabel = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'][parts.weekday];
 
     if (apiSession.kind === 'missed') {
       // Only register missed for the day; later we'll merge with session list
@@ -142,6 +146,7 @@ function transformApiSessions(apiSessions: SessionResponse[]): {
     const timeStr = sessionDate.toLocaleTimeString('th-TH', {
       hour: '2-digit',
       minute: '2-digit',
+      timeZone: 'Asia/Bangkok',
     });
 
     // Normalize painLevel coming from session_logs. Backend may store a broader range
@@ -429,8 +434,6 @@ export default function HistoryScreen() {
     return displayMissed.filter((m) => !sessionDates.has(m.date));
   }, [dayGroups, displayMissed]);
 
-  const Y_FLOOR = 50;
-  const Y_CEILING = 130;
   const MAX_CHART_POINTS = 10;
 
   const chartData = useMemo(() => {
@@ -438,17 +441,24 @@ export default function HistoryScreen() {
     const reversedGroups = [...dayGroups.slice(0, MAX_CHART_POINTS)].reverse();
 
     const labels = reversedGroups.map((g) => {
-      const d = new Date(g.sessions[0].ts);
-      return `${d.getDate()}/${d.getMonth() + 1}`;
+      const p = bangkokParts(new Date(g.sessions[0].ts));
+      return `${p.day}/${p.month0 + 1}`;
     });
     const actualValues = reversedGroups.map((g) => Math.max(...g.sessions.map((s) => s.achievedFlexion)));
     const targetValues = reversedGroups.map((g) => g.sessions[0].targetFlexion);
 
+    // Dynamic Y range: ±10° padding around the actual data so the chart auto-fits.
+    const allValues = [...actualValues, ...targetValues].filter((v) => Number.isFinite(v));
+    const dataMin = allValues.length > 0 ? Math.min(...allValues) : 50;
+    const dataMax = allValues.length > 0 ? Math.max(...allValues) : 130;
+    const yFloor = Math.max(0, Math.floor(dataMin - 10));
+    const yCeiling = Math.ceil(dataMax + 10);
+
     return {
       labels,
       datasets: [
-        { data: reversedGroups.map(() => Y_FLOOR),   color: (): string => 'rgba(0,0,0,0)', strokeWidth: 0 },
-        { data: reversedGroups.map(() => Y_CEILING), color: (): string => 'rgba(0,0,0,0)', strokeWidth: 0 },
+        { data: reversedGroups.map(() => yFloor),   color: (): string => 'rgba(0,0,0,0)', strokeWidth: 0 },
+        { data: reversedGroups.map(() => yCeiling), color: (): string => 'rgba(0,0,0,0)', strokeWidth: 0 },
         { data: targetValues, color: (): string => TARGET_LINE_COLOR, strokeWidth: 2, strokeDashArray: [6, 4] },
         { data: actualValues, color: (): string => ACTUAL_LINE_COLOR, strokeWidth: 3 },
       ],

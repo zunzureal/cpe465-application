@@ -319,6 +319,10 @@ export interface PlanSummary {
   durationMinutes?: number;
   status?: string;
   createdAt?: string;
+  startDate?: string;
+  endDate?: string;
+  daysOfWeek?: number[];
+  sessionsPerDay?: number;
 }
 
 export interface SessionEntry {
