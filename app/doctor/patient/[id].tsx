@@ -1071,9 +1071,9 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   meta: {
-    ...DSTypography.body,
+    ...DSTypography.captionBold,
     marginBottom: 8,
-    color: DSColors.text.secondary,
+    color: DSColors.text.primary,
   },
   metaRow: {
     flexDirection: 'row',
@@ -1107,8 +1107,8 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   sectionLabel: {
-    ...DSTypography.caption,
-    color: DSColors.text.secondary,
+    ...DSTypography.captionBold,
+    color: DSColors.text.primary,
     marginBottom: 8,
     marginTop: 4,
     textTransform: 'uppercase' as const,

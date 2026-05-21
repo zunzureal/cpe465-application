@@ -156,7 +156,7 @@ export function DoctorOverviewDashboard() {
       const displayPatients: Patient[] = response.data.patients.map((p) => ({
         ...p,
         program: 'เข่าขวา',
-        status: 'รอดำเนินการ',
+        status: '',
         lastSession: undefined,
       }));
 
@@ -656,9 +656,9 @@ function PatientRow({ item }: { item: Patient }) {
         <Text style={styles.rowProgram}>{item.program}</Text>
         {!!item.lastSession && <Text style={styles.rowLast}>{item.lastSession}</Text>}
       </View>
-      <View style={[styles.statusChip, { backgroundColor: `${statusColor}18` }]}>
+      {/* <View style={[styles.statusChip, { backgroundColor: `${statusColor}18` }]}>
         <Text style={[styles.statusText, { color: statusColor }]}>{item.status}</Text>
-      </View>
+      </View> */}
 
       {/* Action icons: Edit and Delete */}
       <View style={styles.rowActions}>
@@ -1175,10 +1175,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   primaryButton: {
-    flex: 1,
     backgroundColor: DSColors.primary,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
     borderRadius: DSShape.radiusButton,
     alignItems: 'center',
   },
@@ -1269,7 +1266,6 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    marginLeft: 8,
     backgroundColor: DSColors.surface,
     borderWidth: 1,
     borderColor: DSColors.border,

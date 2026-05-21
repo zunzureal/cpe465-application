@@ -68,9 +68,9 @@ export function PhoneLoginScreen({ onSuccess }: PhoneLoginScreenProps) {
 
       <LoginPrimaryButton label="เข้าสู่ระบบ" disabled={!canSubmit} onPress={submit} />
 
-      <LoginTextButton onPress={mockLogin} accessibilityLabel="ทดสอบด้วยเบอร์ตัวอย่าง">
+      {/* <LoginTextButton onPress={mockLogin} accessibilityLabel="ทดสอบด้วยเบอร์ตัวอย่าง">
         ทดสอบด้วยเบอร์ 0812345678
-      </LoginTextButton>
+      </LoginTextButton> */}
     </LoginScreenShell>
   );
 }
