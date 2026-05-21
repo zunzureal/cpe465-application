@@ -1130,6 +1130,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: DSColors.success,
     gap: 8,
     borderRadius: DSShape.radiusButton,
     paddingVertical: 16,
@@ -1140,7 +1141,13 @@ const styles = StyleSheet.create({
   },
   startSessionCtaText: {
     ...DSTypography.bodyBold,
-    color: '#FFFFFF',
+    backgroundColor: DSColors.primary,
+    textAlign: 'center',
+    gap: 8,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: DSShape.radiusButton,
+    color: '#ffffff',
     fontSize: 18,
   },
   startSessionCtaDone: {

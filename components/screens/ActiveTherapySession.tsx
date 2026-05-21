@@ -750,16 +750,6 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
             <View style={styles.planRow}>
               <View style={styles.planRowLeft}>
                 <View style={styles.planIconWrap}>
-                  <Ionicons name="pause-circle-outline" size={18} color={DSColors.primary} />
-                </View>
-                <Text style={styles.planLabel}>คงค้างที่จุดสิ้นสุด</Text>
-              </View>
-              <Text style={styles.planValue}>{presets.holdTime} วิ</Text>
-            </View>
-
-            <View style={styles.planRow}>
-              <View style={styles.planRowLeft}>
-                <View style={styles.planIconWrap}>
                   <Ionicons name="time-outline" size={18} color={DSColors.primary} />
                 </View>
                 <Text style={styles.planLabel}>ระยะเวลา</Text>
@@ -798,6 +788,7 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
   if (sessionState === 'FINISHED') {
     const completed = timeCompletedRef.current;
     const maxFlex = maxFlexionRef.current;
+    const maxForce = atMaxForce.valueOf;
 
     // Step 1: Ask for pain level, then submit
     if (postResultStatus !== 'success') {
@@ -869,11 +860,14 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
               <Text style={styles.summaryLabel}>งอเข่าสูงสุด</Text>
               <Text style={styles.summaryValue}>{maxFlex}°</Text>
             </View>
+             <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>งอเข่าสูงสุด</Text>
+              <Text style={styles.summaryValue}>{}°</Text>
+            </View>
           </View>
 
           <TouchableOpacity activeOpacity={0.7} style={styles.backButton} onPress={() => router.back()}>
             <Text style={styles.buttonLabel}>กลับหน้าหลัก (Back to Home)</Text>
-            <Ionicons name="home" size={22} color="#FFFFFF" />
           </TouchableOpacity>
         </View>
       </SafeAreaView>

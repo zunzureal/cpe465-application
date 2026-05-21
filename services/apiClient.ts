@@ -6,6 +6,7 @@
  */
 
 import { Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const CLOUD_RUN_API_BASE = 'https://project-465-service-649507438534.asia-southeast1.run.app';
 
@@ -45,12 +46,27 @@ async function apiCall<T>(
     Accept: 'application/json',
   };
 
+  // If caller didn't pass a token, try to read from AsyncStorage (AuthContext persists it there)
+  try {
+    const AUTH_TOKEN_KEY = '@cpe465_auth_token';
+    if (!authToken) {
+      const stored = await AsyncStorage.getItem(AUTH_TOKEN_KEY);
+      if (stored) authToken = stored;
+    }
+  } catch (e) {
+    // ignore storage read errors
+  }
+
   if (authToken) {
     defaultHeaders['Authorization'] = `Bearer ${authToken}`;
   }
 
   try {
-    const response = await fetch(`${API_BASE}${endpoint}`, {
+    const fullUrl = `${API_BASE}${endpoint}`;
+    console.error('[apiCall] fetch', method, fullUrl);
+    // Debug: log headers (includes Authorization when authToken provided)
+    console.error('[apiCall] headers', defaultHeaders);
+    const response = await fetch(fullUrl, {
       method,
       headers: { ...defaultHeaders, ...headers },
       body: body ? JSON.stringify(body) : undefined,
@@ -58,10 +74,18 @@ async function apiCall<T>(
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => '');
-      const errorData = errorText ? JSON.parse(errorText).error || errorText : 'Unknown error';
+      let errorData = 'Unknown error';
+      try {
+        errorData = errorText ? JSON.parse(errorText).error || errorText : 'Unknown error';
+      } catch (e) {
+        errorData = errorText || response.statusText || 'Unknown error';
+      }
+      const url = response.url || `${API_BASE}${endpoint}`;
+      const errMsg = `HTTP ${response.status} ${response.statusText} at ${url}: ${errorData}`;
+      console.error('[apiCall] request failed:', errMsg);
       return {
         success: false,
-        error: `HTTP ${response.status}: ${errorData}`,
+        error: errMsg,
       };
     }
 
@@ -167,6 +191,12 @@ export async function updatePatient(
   patientId: number,
   body: UpdatePatientPayload
 ): Promise<ApiResponse<{ id: number }>> {
+  try {
+    const url = `${API_BASE}/api/patients/${patientId}`;
+    console.error(`[api] PUT ${url} payload:`, body);
+  } catch (e) {
+    // ignore
+  }
   return apiCall<{ id: number }>(`/api/patients/${patientId}`, {
     method: 'PUT',
     body,
@@ -277,6 +307,12 @@ export async function deletePatient(
   authToken: string,
   patientId: number
 ): Promise<ApiResponse<{}>> {
+  try {
+    const url = `${API_BASE}/api/patients/${patientId}`;
+    console.error(`[api] DELETE ${url}`);
+  } catch (e) {
+    // ignore
+  }
   return apiCall<{}>(`/api/patients/${patientId}`, { method: 'DELETE' }, authToken);
 }
 

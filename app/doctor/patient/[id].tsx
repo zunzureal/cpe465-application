@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { View, TextInput, Switch, StyleSheet, Pressable, Text, TouchableOpacity, useWindowDimensions, Modal, ScrollView, Platform, Dimensions } from 'react-native';
 import { LineChart } from 'react-native-chart-kit';
@@ -176,6 +176,10 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
   const [isEditingPlan, setIsEditingPlan] = useState(false);
   const [isDeletingPlan, setIsDeletingPlan] = useState(false);
   const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
+  const recentChartRef = useRef<any[]>([]);
+  const [tooltipVisible, setTooltipVisible] = useState(false);
+  const [tooltipText, setTooltipText] = useState('');
+  const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null);
 
   // Compute which weekdays are present in the selected plan range (0=Sun..6=Sat)
   function getAllowedWeekdays(start: string, end: string) {
@@ -615,7 +619,8 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
           (() => {
             const sortedSessions = sessions.slice().sort((a, b) => new Date((a as any).sessionDate).getTime() - new Date((b as any).sessionDate).getTime());
             const recent = sortedSessions.slice(-7);
-            const labels = recent.map((s) => new Date((s as any).sessionDate).toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' }));
+            const labels = recent.map(() => '');
+            recentChartRef.current = recent;
             const actuals = recent.map((s) => Number((s as any).actualMaxFlexion) || 0);
             const target = recent.map(() => Number(targetFlexion) || 0);
             if (isAndroidTablet) {
@@ -677,10 +682,31 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
                     withInnerLines
                     withOuterLines={false}
                     style={{ borderRadius: 12, overflow: 'hidden' }}
+                    verticalLabelRotation={-45}
+                    onDataPointClick={(dp: any) => {
+                      const idx = dp.index as number;
+                      const s = recentChartRef.current[idx];
+                      if (!s) return;
+                      const d = new Date(s.sessionDate || s.ts || Date.now());
+                      const dateLabel = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
+                      setTooltipText(`ครั้งที่ ${idx + 1}\n(${dateLabel})`);
+                      const x = typeof dp.x === 'number' ? dp.x : 0;
+                      const y = typeof dp.y === 'number' ? dp.y : 0;
+                      setTooltipPos({ x, y });
+                      setTooltipVisible(true);
+                      setTimeout(() => setTooltipVisible(false), 3000);
+                    }}
                     formatYLabel={(v) => `${Math.round(Number(v))}°`}
                     fromZero={false}
                     yLabelsOffset={8}
                   />
+                    {tooltipVisible && tooltipPos && (
+                    <View style={{ position: 'absolute', left: Math.max(8, tooltipPos.x - 40), top: Math.max(8, tooltipPos.y - 56), zIndex: 999 }} pointerEvents="none">
+                      <View style={{ backgroundColor: DSColors.surface, paddingVertical: 6, paddingHorizontal: 8, borderRadius: 8, borderWidth: 1, borderColor: DSColors.borderLight, maxWidth: 160, alignItems: 'center' }}>
+                        <Text style={{ ...DSTypography.small, color: DSColors.text.primary, textAlign: 'center', lineHeight: 18 }}>{tooltipText}</Text>
+                      </View>
+                    </View>
+                  )}
                   <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 16, marginTop: 8 }}>
                     <View style={styles.androidTabletLegendItem}>
                       <View style={[styles.androidTabletLegendDot, { backgroundColor: ACTUAL_LINE_COLOR }]} />

@@ -5,8 +5,9 @@
  */
 
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Dimensions, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useMemo, useState, useRef } from 'react';
+import { ActivityIndicator, Dimensions, Pressable, ScrollView, StyleSheet, Text, View, Modal } from 'react-native';
+import Tooltip from 'react-native-tooltip-2';
 import { LineChart } from 'react-native-chart-kit';
 // Chart types from react-native-chart-kit are incompatible with our React typings
 // in some environments; provide a local any-typed alias for JSX usage.
@@ -182,29 +183,29 @@ function transformApiSessions(apiSessions: any[]): SessionRecord[] {
 }
 
 // Keep MOCK_SESSIONS as fallback for development
-const MOCK_SESSIONS: SessionRecord[] = [
-  // 4 มี.ค. — 3/3 ✓
-  { id: '1a', date: '4 มี.ค. 2568', time: '09:30', ts: Date.now(), sessionNum: 1, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 88, targetFlexion: 85, painLevel: 1, isManual: false, dayLabel: 'ศ.' },
-  { id: '1b', date: '4 มี.ค. 2568', time: '12:00', ts: Date.now(), sessionNum: 2, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 89, targetFlexion: 85, painLevel: 1, isManual: false, dayLabel: 'ศ.' },
-  { id: '1c', date: '4 มี.ค. 2568', time: '15:00', ts: Date.now(), sessionNum: 3, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 90, targetFlexion: 85, painLevel: 2, isManual: false, dayLabel: 'ศ.' },
-  // 3 มี.ค. — 2/3
-  { id: '2a', date: '3 มี.ค. 2568', time: '09:00', ts: Date.now(), sessionNum: 1, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 85, targetFlexion: 85, painLevel: 2, isManual: true,  dayLabel: 'พฤ.' },
-  { id: '2b', date: '3 มี.ค. 2568', time: '13:30', ts: Date.now(), sessionNum: 2, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 84, targetFlexion: 85, painLevel: 2, isManual: false, dayLabel: 'พฤ.' },
-  // 2 มี.ค. — 3/3 ✓
-  { id: '3a', date: '2 มี.ค. 2568', time: '10:15', ts: Date.now(), sessionNum: 1, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 86, targetFlexion: 85, painLevel: 1, isManual: false, dayLabel: 'พ.' },
-  { id: '3b', date: '2 มี.ค. 2568', time: '13:00', ts: Date.now(), sessionNum: 2, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 87, targetFlexion: 85, painLevel: 1, isManual: false, dayLabel: 'พ.' },
-  { id: '3c', date: '2 มี.ค. 2568', time: '16:00', ts: Date.now(), sessionNum: 3, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 88, targetFlexion: 85, painLevel: 1, isManual: false, dayLabel: 'พ.' },
-  // 1 มี.ค. — 1/3
-  { id: '4a', date: '1 มี.ค. 2568', time: '16:45', ts: Date.now(), sessionNum: 1, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 82, targetFlexion: 80, painLevel: 2, isManual: false, dayLabel: 'อ.' },
-  // 28 ก.พ. — 3/3 ✓
-  { id: '5a', date: '28 ก.พ. 2568', time: '09:00', ts: Date.now(), sessionNum: 1, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 78, targetFlexion: 75, painLevel: 1, isManual: false, dayLabel: 'จ.' },
-  { id: '5b', date: '28 ก.พ. 2568', time: '12:00', ts: Date.now(), sessionNum: 2, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 79, targetFlexion: 75, painLevel: 1, isManual: true,  dayLabel: 'จ.' },
-  { id: '5c', date: '28 ก.พ. 2568', time: '15:30', ts: Date.now(), sessionNum: 3, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 80, targetFlexion: 75, painLevel: 1, isManual: false, dayLabel: 'จ.' },
-];
+// const MOCK_SESSIONS: SessionRecord[] = [
+//   // 4 มี.ค. — 3/3 ✓
+//   { id: '1a', date: '4 มี.ค. 2568', time: '09:30', ts: Date.now(), sessionNum: 1, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 88, targetFlexion: 85, painLevel: 1, isManual: false, dayLabel: 'ศ.' },
+//   { id: '1b', date: '4 มี.ค. 2568', time: '12:00', ts: Date.now(), sessionNum: 2, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 89, targetFlexion: 85, painLevel: 1, isManual: false, dayLabel: 'ศ.' },
+//   { id: '1c', date: '4 มี.ค. 2568', time: '15:00', ts: Date.now(), sessionNum: 3, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 90, targetFlexion: 85, painLevel: 2, isManual: false, dayLabel: 'ศ.' },
+//   // 3 มี.ค. — 2/3
+//   { id: '2a', date: '3 มี.ค. 2568', time: '09:00', ts: Date.now(), sessionNum: 1, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 85, targetFlexion: 85, painLevel: 2, isManual: true,  dayLabel: 'พฤ.' },
+//   { id: '2b', date: '3 มี.ค. 2568', time: '13:30', ts: Date.now(), sessionNum: 2, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 84, targetFlexion: 85, painLevel: 2, isManual: false, dayLabel: 'พฤ.' },
+//   // 2 มี.ค. — 3/3 ✓
+//   { id: '3a', date: '2 มี.ค. 2568', time: '10:15', ts: Date.now(), sessionNum: 1, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 86, targetFlexion: 85, painLevel: 1, isManual: false, dayLabel: 'พ.' },
+//   { id: '3b', date: '2 มี.ค. 2568', time: '13:00', ts: Date.now(), sessionNum: 2, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 87, targetFlexion: 85, painLevel: 1, isManual: false, dayLabel: 'พ.' },
+//   { id: '3c', date: '2 มี.ค. 2568', time: '16:00', ts: Date.now(), sessionNum: 3, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 88, targetFlexion: 85, painLevel: 1, isManual: false, dayLabel: 'พ.' },
+//   // 1 มี.ค. — 1/3
+//   { id: '4a', date: '1 มี.ค. 2568', time: '16:45', ts: Date.now(), sessionNum: 1, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 82, targetFlexion: 80, painLevel: 2, isManual: false, dayLabel: 'อ.' },
+//   // 28 ก.พ. — 3/3 ✓
+//   { id: '5a', date: '28 ก.พ. 2568', time: '09:00', ts: Date.now(), sessionNum: 1, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 78, targetFlexion: 75, painLevel: 1, isManual: false, dayLabel: 'จ.' },
+//   { id: '5b', date: '28 ก.พ. 2568', time: '12:00', ts: Date.now(), sessionNum: 2, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 79, targetFlexion: 75, painLevel: 1, isManual: true,  dayLabel: 'จ.' },
+//   { id: '5c', date: '28 ก.พ. 2568', time: '15:30', ts: Date.now(), sessionNum: 3, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 80, targetFlexion: 75, painLevel: 1, isManual: false, dayLabel: 'จ.' },
+// ];
 
-// Hidden flag to force mock data (useful for offline/manual testing).
-// Set environment variable `EXPO_PUBLIC_FORCE_MOCK_SESSIONS=1` to enable.
-const FORCE_MOCK = process.env.EXPO_PUBLIC_FORCE_MOCK_SESSIONS === '1';
+// // Hidden flag to force mock data (useful for offline/manual testing).
+// // Set environment variable `EXPO_PUBLIC_FORCE_MOCK_SESSIONS=1` to enable.
+// const FORCE_MOCK = process.env.EXPO_PUBLIC_FORCE_MOCK_SESSIONS === '1';
 
 // Group sessions by date for display
 interface DayGroup {
@@ -343,11 +344,11 @@ export default function HistoryScreen() {
   useEffect(() => {
     async function loadSessions() {
       // If developer explicitly requests mock data, skip API and use local mock.
-      if (FORCE_MOCK) {
-        setSessions(MOCK_SESSIONS);
-        setIsLoading(false);
-        return;
-      }
+      // if (FORCE_MOCK) {
+      //   setSessions(MOCK_SESSIONS);
+      //   setIsLoading(false);
+      //   return;
+      // }
 
       if (!auth.patientId) {
         setError('Patient ID not found');
@@ -365,13 +366,11 @@ export default function HistoryScreen() {
         } else {
           setError(response.error || 'Failed to fetch sessions');
           // Fall back to mock data if fetch fails
-          setSessions(MOCK_SESSIONS);
         }
       } catch (err) {
         console.error('Error loading sessions:', err);
         setError('Failed to load session history');
         // Fall back to mock data
-        setSessions(MOCK_SESSIONS);
       } finally {
         setIsLoading(false);
       }
@@ -382,7 +381,7 @@ export default function HistoryScreen() {
 
   // displaySessions: filtered by period — drives summary stats + session list
   const displaySessions = useMemo(() => {
-    const base = isLoading ? [] : (sessions.length > 0 ? sessions : MOCK_SESSIONS);
+    const base = isLoading ? [] : (sessions.length > 0 ? sessions : []);
     if (selectedPeriod === 'all') return base;
     const days = selectedPeriod === '7d' ? 7 : 30;
     const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
@@ -394,27 +393,46 @@ export default function HistoryScreen() {
   const Y_CEILING = 130;
   const MAX_CHART_POINTS = 10;
 
-  const chartData = useMemo(() => {
-    if (dayGroups.length === 0) return null;
-    const reversedGroups = [...dayGroups.slice(0, MAX_CHART_POINTS)].reverse();
+  const recentRef = useRef<any[]>([]);
 
-    const labels = reversedGroups.map((g) => {
-      const d = new Date(g.sessions[0].ts);
-      return `${d.getDate()}/${d.getMonth() + 1}`;
-    });
-    const actualValues = reversedGroups.map((g) => Math.max(...g.sessions.map((s) => s.achievedFlexion)));
-    const targetValues = reversedGroups.map((g) => g.sessions[0].targetFlexion);
+  const chartData = useMemo(() => {
+    // Use recent individual sessions (not grouped by day) so X-axis shows ครั้ง N
+    const points = displaySessions.length === 0 ? [] : displaySessions.slice(-MAX_CHART_POINTS);
+    if (points.length === 0) return null;
+    const recent = [...points].reverse(); // oldest→newest from left to right
+
+    // Build X-axis labels depending on selected period:
+    // - 7d: show 1..7
+    // - 30d: show 1,5,10,15,20,25,30 mapped across available points
+    const labels = Array(recent.length).fill('');
+    recentRef.current = recent;
+    if (selectedPeriod === '7d') {
+      for (let i = 0; i < recent.length; i += 1) labels[i] = `${i + 1}`;
+    } else if (selectedPeriod === '30d') {
+      const ticks = [1, 5, 10, 15, 20, 25, 30];
+      const days = 30;
+      for (const t of ticks) {
+        const idx = Math.round(((t - 1) / (days - 1)) * (recent.length - 1));
+        if (idx >= 0 && idx < labels.length) labels[idx] = `${t}`;
+      }
+    }
+    const actualValues = recent.map((s) => s.achievedFlexion);
+    const targetValues = recent.map((s) => s.targetFlexion || 0);
 
     return {
       labels,
       datasets: [
-        { data: reversedGroups.map(() => Y_FLOOR),   color: (): string => 'rgba(0,0,0,0)', strokeWidth: 0 },
-        { data: reversedGroups.map(() => Y_CEILING), color: (): string => 'rgba(0,0,0,0)', strokeWidth: 0 },
+        { data: recent.map(() => Y_FLOOR),   color: (): string => 'rgba(0,0,0,0)', strokeWidth: 0 },
+        { data: recent.map(() => Y_CEILING), color: (): string => 'rgba(0,0,0,0)', strokeWidth: 0 },
         { data: targetValues, color: (): string => TARGET_LINE_COLOR, strokeWidth: 2, strokeDashArray: [6, 4] },
         { data: actualValues, color: (): string => ACTUAL_LINE_COLOR, strokeWidth: 3 },
       ],
     };
-  }, [dayGroups]);
+  }, [displaySessions]);
+
+  const [tooltipVisible, setTooltipVisible] = useState(false);
+  const [tooltipText, setTooltipText] = useState('');
+  const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null);
 
   const totalSessions = displaySessions.length;
   const totalDays = dayGroups.length;
@@ -427,6 +445,9 @@ export default function HistoryScreen() {
       >
 
         <PeriodSelector selected={selectedPeriod} onSelect={setSelectedPeriod} />
+  <View style={styles.periodRow}>
+          <Text style={styles.periodTabTextActive}>ทั้งหมด</Text>
+        </View>
 
         {/* ── Summary banner ─────────────────────────────────────────────── */}
         <View style={[styles.summaryCard, DSShadow]}>
@@ -460,22 +481,48 @@ export default function HistoryScreen() {
               }
             </View>
           ) : (
-            <AnyLineChart
-              data={chartData}
-              width={CHART_WIDTH}
-              height={CHART_HEIGHT}
-              yAxisLabel=""
-              fromZero={false}
-              withInnerLines
-              withOuterLines
-              chartConfig={makeChartConfig(DSColors.text.secondary, DSColors.borderLight)}
-              style={styles.chart}
-              withDots
-              withVerticalLabels
-              withHorizontalLabels
-              segments={5}
-              formatYLabel={(v: string) => `${Math.round(Number(v))}°`}
-            />
+            <>
+              <View style={{ position: 'relative' }}>
+                <AnyLineChart
+                  data={chartData}
+                  width={CHART_WIDTH}
+                  height={CHART_HEIGHT}
+                  yAxisLabel=""
+                  fromZero={false}
+                  withInnerLines
+                  withOuterLines
+                  chartConfig={makeChartConfig(DSColors.text.secondary, DSColors.borderLight)}
+                  style={styles.chart}
+                  withDots
+                  withVerticalLabels
+                  withHorizontalLabels
+                  onDataPointClick={(dp: any) => {
+                    const idx = dp.index as number;
+                    const s = recentRef.current[idx];
+                    if (!s) return;
+                    const d = new Date(s.ts);
+                    const dateLabel = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
+                    setTooltipText(`ครั้งที่ ${idx + 1}\n(${dateLabel})`);
+                    // dp.x/dp.y are relative coordinates from chart lib
+                    const x = typeof dp.x === 'number' ? dp.x : 0;
+                    const y = typeof dp.y === 'number' ? dp.y : 0;
+                    setTooltipPos({ x, y });
+                    setTooltipVisible(true);
+                    // auto-hide
+                    setTimeout(() => setTooltipVisible(false), 3000);
+                  }}
+                  segments={5}
+                  formatYLabel={(v: string) => `${Math.round(Number(v))}°`}
+                />
+                {tooltipVisible && tooltipPos && (
+                  <View style={{ position: 'absolute', left: Math.max(8, tooltipPos.x - 40), top: Math.max(8, tooltipPos.y - 56), zIndex: 999 }} pointerEvents="none">
+                    <View style={styles.tooltipCard}>
+                      <Text style={styles.tooltipText}>{tooltipText}</Text>
+                    </View>
+                  </View>
+                )}
+              </View>
+            </>
           )}
 
           <View style={styles.legend}>
@@ -879,5 +926,27 @@ const styles = StyleSheet.create({
   },
   periodTabTextActive: {
     color: DSColors.text.inverse,
+  },
+  tooltipOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tooltipCard: {
+    backgroundColor: DSColors.surface,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: DSColors.borderLight,
+    maxWidth: 180,
+    alignItems: 'center',
+  },
+  tooltipText: {
+    ...DSTypography.small,
+    color: DSColors.text.primary,
+    textAlign: 'center',
+    lineHeight: 16,
   },
 });
