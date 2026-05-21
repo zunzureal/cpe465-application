@@ -20,12 +20,16 @@ import {
 import { useMockDeviceConnection } from '@/hooks/useMockDeviceConnection';
 
 const MAX_SAFE_ANGLE = 65;
-const MAX_SAFE_FORCE = 10;
+const MAX_SAFE_FORCE_CEILING = 50; // safety cap for self-practice ceiling
+const MIN_FORCE_CEILING = 5;
+const FORCE_LEVEL_MAX = 10;
+const SPEED_MIN = 1;
+const SPEED_MAX = 5;
 
 const TOUCH_HEIGHT = 52;
 const STEP_ANGLE = 5;
 const STEP_DURATION = 5;
-const STEP_FORCE = 1;
+const STEP_FORCE_CEILING = 5;
 
 // ─── Stepper row ─────────────────────────────────────────────────────────────
 
@@ -148,11 +152,23 @@ export default function ManualSetupScreen() {
   const [angleStart, setAngleStart] = useState(15);
   const [angleEnd, setAngleEnd] = useState(MAX_SAFE_ANGLE);
   const [durationMinutes, setDurationMinutes] = useState(20);
-  const [forceN, setForceN] = useState(5);
+  const [speedLevel, setSpeedLevel] = useState(3);
+  const [forceCeilingN, setForceCeilingN] = useState(20);
 
   const handleStart = () => {
     startMockConnection(() =>
-      router.push({ pathname: '/therapy-session', params: { isManualMode: 'true' } })
+      router.push({
+        pathname: '/therapy-session',
+        params: {
+          isManualMode: 'true',
+          angleStart: String(angleStart),
+          angleEnd: String(angleEnd),
+          durationMinutes: String(durationMinutes),
+          speedLevel: String(speedLevel),
+          forceCeilingN: String(forceCeilingN),
+          forceLevel: String(FORCE_LEVEL_MAX),
+        },
+      })
     );
   };
 
@@ -172,8 +188,8 @@ export default function ManualSetupScreen() {
         {/* Settings card */}
         <View style={[styles.card, DSShadow]}>
           <StepperRow
-            label="มุมเริ่มต้น"
-            sublabel="Starting Angle"
+            label="เหยียดขา"
+            sublabel="เป้าหมายองศาต่ำสุด"
             value={angleStart}
             unit="°"
             onMinus={() => setAngleStart(p => Math.max(0, p - STEP_ANGLE))}
@@ -182,8 +198,8 @@ export default function ManualSetupScreen() {
             atMax={angleStart >= MAX_SAFE_ANGLE}
           />
           <StepperRow
-            label="มุมสิ้นสุด"
-            sublabel="Ending Angle"
+            label="งอเข่าสูงสุด"
+            sublabel="เป้าหมายองศาสูงสุด"
             value={angleEnd}
             unit="°"
             onMinus={() => setAngleEnd(p => Math.max(0, p - STEP_ANGLE))}
@@ -193,7 +209,7 @@ export default function ManualSetupScreen() {
           />
           <StepperRow
             label="ระยะเวลา"
-            sublabel="Duration"
+            sublabel="รวมเวลาทั้งเซสชัน"
             value={durationMinutes}
             unit="นาที"
             onMinus={() => setDurationMinutes(p => Math.max(5, p - STEP_DURATION))}
@@ -201,16 +217,26 @@ export default function ManualSetupScreen() {
             atMin={durationMinutes <= 5}
             atMax={durationMinutes >= 60}
           />
+          <StepperRow
+            label="ความเร็ว"
+            sublabel={`ระดับ ${SPEED_MIN}–${SPEED_MAX}`}
+            value={speedLevel}
+            unit="lv."
+            onMinus={() => setSpeedLevel(p => Math.max(SPEED_MIN, p - 1))}
+            onPlus={() => setSpeedLevel(p => Math.min(SPEED_MAX, p + 1))}
+            atMin={speedLevel <= SPEED_MIN}
+            atMax={speedLevel >= SPEED_MAX}
+          />
           <View style={styles.lastRow}>
             <StepperRow
-              label="แรง"
-              sublabel="Force Level"
-              value={forceN}
+              label="แรงจำกัด"
+              sublabel="เพดานสูงสุด (= ระดับ 10)"
+              value={forceCeilingN}
               unit="N"
-              onMinus={() => setForceN(p => Math.max(1, p - STEP_FORCE))}
-              onPlus={() => setForceN(p => Math.min(MAX_SAFE_FORCE, p + STEP_FORCE))}
-              atMin={forceN <= 1}
-              atMax={forceN >= MAX_SAFE_FORCE}
+              onMinus={() => setForceCeilingN(p => Math.max(MIN_FORCE_CEILING, p - STEP_FORCE_CEILING))}
+              onPlus={() => setForceCeilingN(p => Math.min(MAX_SAFE_FORCE_CEILING, p + STEP_FORCE_CEILING))}
+              atMin={forceCeilingN <= MIN_FORCE_CEILING}
+              atMax={forceCeilingN >= MAX_SAFE_FORCE_CEILING}
             />
           </View>
 

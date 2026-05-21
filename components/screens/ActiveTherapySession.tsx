@@ -37,7 +37,6 @@ import {
   sendSessionResume,
   sendStartCommand,
 } from '@/services/deviceService';
-import { startSession } from '@/services/apiClient';
 import {
   getPatientPreset,
   getPatientTodayStats,
@@ -69,6 +68,8 @@ export interface DoctorPresets {
   useWarmUp: boolean;
   /** Resistance force threshold in Newtons (N) – safety limit from doctor. */
   targetForceN: number;
+  /** Force level (1–10) – discrete intensity step from doctor preset. */
+  forceLevel?: number;
 }
 
 /** Alias for treatment/machine preset from API (used by API layer). */
@@ -82,6 +83,7 @@ const DEFAULT_PRESETS: DoctorPresets = {
   durationMinutes: 15,
   useWarmUp: true,
   targetForceN: 10,
+  forceLevel: 10,
 };
 
 /** Safe defaults for Manual Practice (no doctor preset). */
@@ -93,6 +95,7 @@ const MANUAL_DEFAULTS = {
   durationMinutes: 20,
   useWarmUp: true,
   targetForceN: 10,
+  forceLevel: 10,
 };
 
 const PRESET_WARM_UP_SECONDS = 5;
@@ -117,12 +120,23 @@ const THEME_MANUAL = {
   successBg: DSColors.successLight,
 };
 
+export interface ManualOverrides {
+  angleStart?: number;
+  angleEnd?: number;
+  durationMinutes?: number;
+  speedLevel?: number;
+  forceCeilingN?: number;
+  forceLevel?: number;
+}
+
 export interface ActiveTherapySessionProps {
   /** When true, manual free practice (orange theme, editable, warning). When false, doctor's plan (blue/green, read-only). */
   isManualMode?: boolean;
+  /** Initial values when entering from manual-setup screen. */
+  manualOverrides?: ManualOverrides;
 }
 
-export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySessionProps) {
+export function ActiveTherapySession({ isManualMode = false, manualOverrides }: ActiveTherapySessionProps) {
   const router = useRouter();
   const { patientId } = useAuth();
   const theme = isManualMode ? THEME_MANUAL : THEME_DOCTOR;
@@ -134,13 +148,28 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
   const [loadingPresets, setLoadingPresets] = useState(!isManualMode);
   const [presetError, setPresetError] = useState<string | null>(null);
 
-  const presets = isManualMode ? { ...MANUAL_DEFAULTS, ...doctorPresets } as DoctorPresets : (doctorPresets ?? DEFAULT_PRESETS);
+  // Manual mode: merge user-provided overrides from setup screen onto MANUAL_DEFAULTS
+  // so that `presets` (the ceiling/baseline) reflects the user's choice.
+  const manualPresets: DoctorPresets = {
+    ...MANUAL_DEFAULTS,
+    flexionDegree: manualOverrides?.angleEnd ?? MANUAL_DEFAULTS.flexionDegree,
+    extensionDegree: manualOverrides?.angleStart ?? MANUAL_DEFAULTS.extensionDegree,
+    durationMinutes: manualOverrides?.durationMinutes ?? MANUAL_DEFAULTS.durationMinutes,
+    speed: manualOverrides?.speedLevel ?? MANUAL_DEFAULTS.speed,
+    targetForceN: manualOverrides?.forceCeilingN ?? MANUAL_DEFAULTS.targetForceN,
+    forceLevel: 10, // manual scaling always 1–10
+  };
 
-  // User-adjustable targets. Doctor: init from API. Manual: init from safe defaults.
-  const [targetFlexion, setTargetFlexion] = useState(isManualMode ? MANUAL_DEFAULTS.flexionDegree : DEFAULT_PRESETS.flexionDegree);
-  const [targetExtension, setTargetExtension] = useState(isManualMode ? MANUAL_DEFAULTS.extensionDegree : DEFAULT_PRESETS.extensionDegree);
-  const [targetSpeed, setTargetSpeed] = useState(isManualMode ? MANUAL_DEFAULTS.speed : DEFAULT_PRESETS.speed);
-  const [targetForceN, setTargetForceN] = useState(isManualMode ? MANUAL_DEFAULTS.targetForceN : DEFAULT_PRESETS.targetForceN);
+  const presets = isManualMode
+    ? ({ ...manualPresets, ...doctorPresets } as DoctorPresets)
+    : (doctorPresets ?? DEFAULT_PRESETS);
+
+  // User-adjustable targets. Doctor: init from API. Manual: init from manual presets (user setup).
+  const [targetFlexion, setTargetFlexion] = useState(isManualMode ? manualPresets.flexionDegree : DEFAULT_PRESETS.flexionDegree);
+  const [targetExtension, setTargetExtension] = useState(isManualMode ? manualPresets.extensionDegree : DEFAULT_PRESETS.extensionDegree);
+  const [targetSpeed, setTargetSpeed] = useState(isManualMode ? manualPresets.speed : DEFAULT_PRESETS.speed);
+  const [targetForceN, setTargetForceN] = useState(isManualMode ? manualPresets.targetForceN : DEFAULT_PRESETS.targetForceN);
+  const [targetForceLevel, setTargetForceLevel] = useState(isManualMode ? (manualOverrides?.forceLevel ?? 5) : DEFAULT_PRESETS.forceLevel ?? 1);
   const [isCustomSettings, setIsCustomSettings] = useState(false);
   const [timeLeft, setTimeLeft] = useState(DEFAULT_PRESETS.durationMinutes * 60);
   const [sessionState, setSessionState] = useState<SessionState>('PREPARATION');
@@ -165,7 +194,7 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
   const [flexionText, setFlexionText] = useState(String(isManualMode ? 45 : 90));
   const [extensionText, setExtensionText] = useState('0');
   const [speedText, setSpeedText] = useState(String(isManualMode ? 2 : 3));
-  const [forceText, setForceText] = useState(String(isManualMode ? 30 : 10));
+  const [forceLevelText, setForceLevelText] = useState(String(isManualMode ? MANUAL_DEFAULTS.forceLevel : DEFAULT_PRESETS.forceLevel ?? 1));
 
   // For FINISHED summary and session result POST
   const timeCompletedRef = useRef(0);
@@ -229,6 +258,7 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
           durationMinutes: Number(data.durationMinutes ?? DEFAULT_PRESETS.durationMinutes),
           useWarmUp: Boolean(data.useWarmup ?? DEFAULT_PRESETS.useWarmUp),
           targetForceN: typeof data.targetForceN === 'number' ? data.targetForceN : DEFAULT_PRESETS.targetForceN,
+          forceLevel: typeof data.forceLevel === 'number' ? data.forceLevel : undefined,
         };
 
         setActivePlanId(Number(data.id));
@@ -237,6 +267,7 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
         setTargetExtension(presetsFromApi.extensionDegree);
         setTargetSpeed(presetsFromApi.speed);
         setTargetForceN(presetsFromApi.targetForceN);
+        if (presetsFromApi.forceLevel != null) setTargetForceLevel(presetsFromApi.forceLevel);
         setTimeLeft(presetsFromApi.durationMinutes * 60);
         setIsWarmingUp(presetsFromApi.useWarmUp);
       })
@@ -366,7 +397,7 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
   useEffect(() => { setFlexionText(String(targetFlexion)); }, [targetFlexion]);
   useEffect(() => { setExtensionText(String(targetExtension)); }, [targetExtension]);
   useEffect(() => { setSpeedText(String(targetSpeed)); }, [targetSpeed]);
-  useEffect(() => { setForceText(String(targetForceN)); }, [targetForceN]);
+  useEffect(() => { setForceLevelText(String(targetForceLevel)); }, [targetForceLevel]);
 
   const handleStartSession = useCallback(() => {
     void sendStartCommand({
@@ -377,19 +408,6 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
       durationMinutes: presets.durationMinutes,
       isManualMode,
     });
-    // Create a session_log entry immediately with status CONTINUE
-    void (async () => {
-      try {
-        const resp = await startSession({ patientId: Number(patientId), planId: Number(activePlanId), isCustomUsed: isCustomSettings });
-        if (resp && resp.success && patientId) {
-          // refresh today's aggregated stats so UI shows the in-progress session
-          const todayResp = await getPatientTodayStats(patientId);
-          if (todayResp.success && todayResp.data) setTodayStats(todayResp.data as TodayStats);
-        }
-      } catch (e) {
-        // ignore errors — session can still proceed offline
-      }
-    })();
     setSessionState('RUNNING');
     setTimeLeft(presets.durationMinutes * 60);
     setIsWarmingUp(presets.useWarmUp);
@@ -556,25 +574,30 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
     [targetSpeed, isManualMode, presets.speed]
   );
 
-  const FORCE_STEP = 5;
-  const FORCE_MIN = 10;
-  const FORCE_MAX = 150;
-  const atMinForce = targetForceN <= FORCE_MIN;
-  const atMaxForce = targetForceN >= FORCE_MAX;
-  const adjustForceN = useCallback(
+  const FORCE_LEVEL_MIN = 1;
+  const FORCE_LEVEL_MAX = presets.forceLevel ?? 10;
+  const atMinForceLevel = targetForceLevel <= FORCE_LEVEL_MIN;
+  const atMaxForceLevel = targetForceLevel >= FORCE_LEVEL_MAX;
+  // Dynamic scaling: doctor's targetForceN is the ceiling (= level FORCE_LEVEL_MAX).
+  // Each level step = ceiling / FORCE_LEVEL_MAX. Actual N = step * currentLevel.
+  const forceStepN = presets.targetForceN / FORCE_LEVEL_MAX;
+  const scaledForceN = Math.round(forceStepN * targetForceLevel);
+  const adjustForceLevel = useCallback(
     (delta: number) => {
-      const next = Math.max(FORCE_MIN, Math.min(FORCE_MAX, targetForceN + delta));
-      setTargetForceN(next);
-      if (!isManualMode && next !== presets.targetForceN) setIsCustomSettings(true);
+      const next = Math.max(FORCE_LEVEL_MIN, Math.min(FORCE_LEVEL_MAX, targetForceLevel + delta));
+      setTargetForceLevel(next);
+      // Keep targetForceN in sync with the scaled value so downstream logic + submit are correct.
+      setTargetForceN(Math.round((presets.targetForceN / FORCE_LEVEL_MAX) * next));
+      if (!isManualMode && presets.forceLevel != null && next !== presets.forceLevel) setIsCustomSettings(true);
     },
-    [targetForceN, isManualMode, presets.targetForceN]
+    [targetForceLevel, isManualMode, presets.forceLevel, presets.targetForceN, FORCE_LEVEL_MAX]
   );
 
   // Doctor's plan: show "customized value" warning when current value differs from preset
   const customFlexion = !isManualMode && targetFlexion !== presets.flexionDegree;
   const customExtension = !isManualMode && targetExtension !== presets.extensionDegree;
   const customSpeed = !isManualMode && targetSpeed !== presets.speed;
-  const customForce = !isManualMode && targetForceN !== presets.targetForceN;
+  const customForceLevel = !isManualMode && presets.forceLevel != null && targetForceLevel !== presets.forceLevel;
 
   const submitSessionResults = useCallback(async () => {
     if (painLevel === null) return;
@@ -756,6 +779,18 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
               </View>
               <Text style={styles.planValue}>{presets.durationMinutes} นาที</Text>
             </View>
+
+            {presets.forceLevel != null && (
+              <View style={styles.planRow}>
+                <View style={styles.planRowLeft}>
+                  <View style={styles.planIconWrap}>
+                    <Ionicons name="barbell-outline" size={18} color={DSColors.primary} />
+                  </View>
+                  <Text style={styles.planLabel}>ระดับแรง</Text>
+                </View>
+                <Text style={styles.planValue}>ระดับ {presets.forceLevel}</Text>
+              </View>
+            )}
 
             <View style={styles.planRow}>
               <View style={styles.planRowLeft}>
@@ -1148,7 +1183,45 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
           </View>
         </View>
 
-        {/* Force Limit */}
+        {/* Force Level */}
+        <View style={styles.paramCard}>
+          <View style={styles.paramRow}>
+            <View style={styles.paramLabelGroup}>
+              <View style={styles.paramIconWrap}>
+                <Ionicons name="barbell-outline" size={18} color={DSColors.primary} />
+              </View>
+              <View style={styles.paramLabelText}>
+                <Text style={styles.paramCardTitle}>ระดับแรง</Text>
+                <Text style={styles.paramCardSub}>ระดับ 1–10</Text>
+              </View>
+            </View>
+            <View style={styles.paramWarnSlot} pointerEvents="none">
+              <View style={[styles.paramWarnInner, { opacity: customForceLevel ? 1 : 0 }]}>
+                <View style={styles.paramWarnIconWrap}>
+                  <Ionicons name="alert-circle" size={22} color={DSColors.warning} />
+                </View>
+                <Text style={styles.paramWarnLabel} numberOfLines={1}>ปรับค่า</Text>
+              </View>
+            </View>
+            <View style={styles.paramStepper}>
+              <TouchableOpacity activeOpacity={0.7} style={[styles.paramStepBtn, atMinForceLevel && styles.paramStepBtnDisabled]} onPress={() => adjustForceLevel(-1)} disabled={atMinForceLevel}>
+                <Ionicons name="remove" size={22} color={atMinForceLevel ? '#C4C4C4' : DSColors.primary} />
+              </TouchableOpacity>
+              <View style={styles.paramValueArea}>
+                <TextInput style={styles.paramValueInput} value={forceLevelText} onChangeText={setForceLevelText} keyboardType="numeric" selectTextOnFocus maxLength={2} returnKeyType="done"
+                  onBlur={() => { const n = parseInt(forceLevelText, 10); if (!isNaN(n)) { const c = Math.max(FORCE_LEVEL_MIN, Math.min(FORCE_LEVEL_MAX, n)); setTargetForceLevel(c); if (!isManualMode && presets.forceLevel != null && c !== presets.forceLevel) setIsCustomSettings(true); } else setForceLevelText(String(targetForceLevel)); }}
+                  onSubmitEditing={() => { const n = parseInt(forceLevelText, 10); if (!isNaN(n)) { const c = Math.max(FORCE_LEVEL_MIN, Math.min(FORCE_LEVEL_MAX, n)); setTargetForceLevel(c); if (!isManualMode && presets.forceLevel != null && c !== presets.forceLevel) setIsCustomSettings(true); } else setForceLevelText(String(targetForceLevel)); }}
+                />
+                <Text style={styles.paramUnitText}>lv.</Text>
+              </View>
+              <TouchableOpacity activeOpacity={0.7} style={[styles.paramStepBtn, atMaxForceLevel && styles.paramStepBtnDisabled]} onPress={() => adjustForceLevel(1)} disabled={atMaxForceLevel}>
+                <Ionicons name="add" size={22} color={atMaxForceLevel ? '#C4C4C4' : DSColors.primary} />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+
+        {/* Force Limit — derived from force level (read-only) */}
         <View style={styles.paramCard}>
           <View style={styles.paramRow}>
             <View style={styles.paramLabelGroup}>
@@ -1157,31 +1230,16 @@ export function ActiveTherapySession({ isManualMode = false }: ActiveTherapySess
               </View>
               <View style={styles.paramLabelText}>
                 <Text style={styles.paramCardTitle}>แรงจำกัด</Text>
-                <Text style={styles.paramCardSub}>Safety limit (N)</Text>
-              </View>
-            </View>
-            <View style={styles.paramWarnSlot} pointerEvents="none">
-              <View style={[styles.paramWarnInner, { opacity: customForce ? 1 : 0 }]}>
-                <View style={styles.paramWarnIconWrap}>
-                  <Ionicons name="alert-circle" size={22} color={DSColors.warning} />
-                </View>
-                <Text style={styles.paramWarnLabel} numberOfLines={1}>ปรับค่า</Text>
+                <Text style={styles.paramCardSub}>
+                  คำนวณจากระดับแรง (เพดาน {presets.targetForceN} N)
+                </Text>
               </View>
             </View>
             <View style={styles.paramStepper}>
-              <TouchableOpacity activeOpacity={0.7} style={[styles.paramStepBtn, atMinForce && styles.paramStepBtnDisabled]} onPress={() => adjustForceN(-FORCE_STEP)} disabled={atMinForce}>
-                <Ionicons name="remove" size={22} color={atMinForce ? '#C4C4C4' : DSColors.primary} />
-              </TouchableOpacity>
               <View style={styles.paramValueArea}>
-                <TextInput style={styles.paramValueInput} value={forceText} onChangeText={setForceText} keyboardType="numeric" selectTextOnFocus maxLength={4} returnKeyType="done"
-                  onBlur={() => { const n = parseInt(forceText, 10); if (!isNaN(n)) { const c = Math.max(FORCE_MIN, Math.min(FORCE_MAX, n)); setTargetForceN(c); if (!isManualMode && c !== presets.targetForceN) setIsCustomSettings(true); } else setForceText(String(targetForceN)); }}
-                  onSubmitEditing={() => { const n = parseInt(forceText, 10); if (!isNaN(n)) { const c = Math.max(FORCE_MIN, Math.min(FORCE_MAX, n)); setTargetForceN(c); if (!isManualMode && c !== presets.targetForceN) setIsCustomSettings(true); } else setForceText(String(targetForceN)); }}
-                />
+                <Text style={[styles.paramValueInput, { textAlign: 'center' }]}>{scaledForceN}</Text>
                 <Text style={styles.paramUnitText}>N</Text>
               </View>
-              <TouchableOpacity activeOpacity={0.7} style={[styles.paramStepBtn, atMaxForce && styles.paramStepBtnDisabled]} onPress={() => adjustForceN(FORCE_STEP)} disabled={atMaxForce}>
-                <Ionicons name="add" size={22} color={atMaxForce ? '#C4C4C4' : DSColors.primary} />
-              </TouchableOpacity>
             </View>
           </View>
         </View>

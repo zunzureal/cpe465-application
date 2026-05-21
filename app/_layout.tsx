@@ -117,6 +117,10 @@ function RootContent() {
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="doctor" />
       <Stack.Screen
+        name="doctor/patient/[id]"
+        options={{ header: () => <CustomHeader showBack /> }}
+      />
+      <Stack.Screen
         name="therapy-session"
         options={{ header: () => <CustomHeader showBack /> }}
       />

@@ -75,79 +75,152 @@ const mockPresets: Record<number, any> = {
 };
 
 // Mock sessions per patient
+const PLAN_SUMMARY_1 = {
+  id: 1,
+  targetFlexion: 120,
+  targetExtension: 0,
+  durationMinutes: 15,
+  status: 'ACTIVE',
+};
+const PLAN_SUMMARY_5 = {
+  id: 5,
+  targetFlexion: 115,
+  targetExtension: 0,
+  durationMinutes: 15,
+  status: 'ACTIVE',
+};
+
 const mockSessions: Record<number, any[]> = {
   1: [
     {
+      kind: 'session',
       id: 1,
       patientId: 1,
+      planId: 1,
       sessionDate: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString(),
       actualMaxFlexion: 100,
-      sessionStatus: 'completed',
+      durationCompleted: 900,
+      isCustomUsed: false,
+      sessionStatus: 'SUCCESS',
+      plan: PLAN_SUMMARY_1,
     },
     {
+      kind: 'session',
       id: 2,
       patientId: 1,
+      planId: 1,
       sessionDate: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
       actualMaxFlexion: 105,
-      sessionStatus: 'completed',
+      durationCompleted: 900,
+      isCustomUsed: false,
+      sessionStatus: 'SUCCESS',
+      plan: PLAN_SUMMARY_1,
     },
     {
-      id: 3,
+      kind: 'missed',
       patientId: 1,
+      planId: 1,
       sessionDate: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString(),
-      actualMaxFlexion: 110,
-      sessionStatus: 'completed',
+      sessionStatus: 'MISSED',
+      expectedSessions: 3,
+      completedSessions: 0,
+      plan: PLAN_SUMMARY_1,
     },
     {
+      kind: 'session',
       id: 4,
       patientId: 1,
+      planId: 1,
       sessionDate: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
       actualMaxFlexion: 115,
-      sessionStatus: 'completed',
+      durationCompleted: 900,
+      isCustomUsed: false,
+      sessionStatus: 'SUCCESS',
+      plan: PLAN_SUMMARY_1,
     },
     {
+      kind: 'session',
       id: 5,
       patientId: 1,
+      planId: 1,
       sessionDate: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
       actualMaxFlexion: 118,
-      sessionStatus: 'completed',
+      durationCompleted: 900,
+      isCustomUsed: false,
+      sessionStatus: 'SUCCESS',
+      plan: PLAN_SUMMARY_1,
     },
     {
+      kind: 'session',
       id: 6,
       patientId: 1,
+      planId: 1,
       sessionDate: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
       actualMaxFlexion: 120,
-      sessionStatus: 'completed',
+      durationCompleted: 900,
+      isCustomUsed: false,
+      sessionStatus: 'SUCCESS',
+      plan: PLAN_SUMMARY_1,
     },
     {
+      kind: 'session',
       id: 7,
       patientId: 1,
+      planId: 1,
       sessionDate: new Date().toISOString(),
       actualMaxFlexion: 120,
-      sessionStatus: 'completed',
+      durationCompleted: 900,
+      isCustomUsed: false,
+      sessionStatus: 'SUCCESS',
+      plan: PLAN_SUMMARY_1,
     },
   ],
   5: [
     {
+      kind: 'session',
       id: 10,
       patientId: 5,
+      planId: 5,
       sessionDate: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
       actualMaxFlexion: 95,
-      sessionStatus: 'completed',
+      durationCompleted: 900,
+      isCustomUsed: false,
+      sessionStatus: 'SUCCESS',
+      plan: PLAN_SUMMARY_5,
     },
     {
+      kind: 'missed',
+      patientId: 5,
+      planId: 5,
+      sessionDate: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+      sessionStatus: 'MISSED',
+      expectedSessions: 2,
+      completedSessions: 1,
+      plan: PLAN_SUMMARY_5,
+    },
+    {
+      kind: 'session',
       id: 11,
       patientId: 5,
+      planId: 5,
       sessionDate: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
       actualMaxFlexion: 110,
-      sessionStatus: 'completed',
+      durationCompleted: 900,
+      isCustomUsed: false,
+      sessionStatus: 'SUCCESS',
+      plan: PLAN_SUMMARY_5,
     },
     {
+      kind: 'session',
       id: 12,
       patientId: 5,
+      planId: 5,
       sessionDate: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
       actualMaxFlexion: 115,
-      sessionStatus: 'completed',
+      durationCompleted: 900,
+      isCustomUsed: false,
+      sessionStatus: 'SUCCESS',
+      plan: PLAN_SUMMARY_5,
     },
   ],
 };
@@ -219,6 +292,15 @@ async function mockGetPatientSessions(patientId: number, options?: any): Promise
   return { success: true, data: sessions };
 }
 
+async function mockDeactivatePlan(authToken: string, patientId: number): Promise<ApiResponse<any>> {
+  await new Promise(resolve => setTimeout(resolve, 300));
+  if (mockPresets[patientId]) {
+    mockPresets[patientId].status = 'inactive';
+    return { success: true, data: mockPresets[patientId] };
+  }
+  return { success: false, error: 'Plan not found' };
+}
+
 export const mockApiClient = {
   loginDoctor: mockLoginDoctor,
   loginPatient: mockLoginPatient,
@@ -228,4 +310,5 @@ export const mockApiClient = {
   getPatientPreset: mockGetPatientPreset,
   putPatientPreset: mockPutPatientPreset,
   getPatientSessions: mockGetPatientSessions,
+  deactivatePlan: mockDeactivatePlan,
 };

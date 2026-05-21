@@ -5,16 +5,16 @@
  */
 
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useMemo, useState, useRef } from 'react';
-import { ActivityIndicator, Dimensions, Pressable, ScrollView, StyleSheet, Text, View, Modal } from 'react-native';
-import Tooltip from 'react-native-tooltip-2';
+import { useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Dimensions, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { LineChart } from 'react-native-chart-kit';
 // Chart types from react-native-chart-kit are incompatible with our React typings
 // in some environments; provide a local any-typed alias for JSX usage.
 const AnyLineChart = LineChart as any;
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { getPatientSessions } from '@/services/apiClient';
+import { getPatientSessions, type SessionResponse } from '@/services/apiClient';
+import { bangkokParts } from '@/utils/dateUtils';
 import {
   DSColors,
   DSLayout,
@@ -76,65 +76,82 @@ interface SessionRecord {
   painLevel: 1 | 2 | 3;
   isManual: boolean;
   dayLabel: string;
-  sessionStatus?: 'SUCCESS' | 'CONTINUE' | 'FAILED';
+  sessionStatus?: 'SUCCESS';
 }
 
-function resolveSessionStatus(apiSession: any): 'SUCCESS' | 'CONTINUE' | 'FAILED' {
-  const storedStatus = String(apiSession.sessionStatus ?? apiSession.status ?? '').toUpperCase();
-  if (storedStatus === 'SUCCESS' || storedStatus === 'CONTINUE' || storedStatus === 'FAILED') {
-    return storedStatus;
-  }
+interface MissedRecord {
+  id: string;
+  date: string;
+  ts: number;
+  dayLabel: string;
+  targetFlexion: number;
+  expectedSessions: number;
+  completedSessions: number;
+}
 
-  if (String(apiSession.plan?.status ?? '').toUpperCase() === 'CANCELLED') {
-    return 'FAILED';
-  }
-
-  return Number(apiSession.actualMaxFlexion ?? 0) >= Number(apiSession.plan?.targetFlexion ?? 0)
-    ? 'SUCCESS'
-    : 'CONTINUE';
+function resolveSessionStatus(apiSession: any): 'SUCCESS' | undefined {
+  const stored = String(apiSession.sessionStatus ?? apiSession.status ?? '').toUpperCase();
+  return stored === 'SUCCESS' ? 'SUCCESS' : undefined;
 }
 
 function resolveDisplaySessionStatus(
-  sessionStatus?: 'SUCCESS' | 'CONTINUE' | 'FAILED',
+  sessionStatus?: 'SUCCESS',
   achievedFlexion?: number,
   targetFlexion?: number,
-): 'SUCCESS' | 'CONTINUE' | 'FAILED' {
-  if (sessionStatus === 'SUCCESS' || sessionStatus === 'CONTINUE' || sessionStatus === 'FAILED') {
-    return sessionStatus;
-  }
-
-  if (achievedFlexion != null && targetFlexion != null) {
-    return achievedFlexion >= targetFlexion ? 'SUCCESS' : 'CONTINUE';
-  }
-
-  return 'CONTINUE';
+): 'SUCCESS' | 'INCOMPLETE' {
+  if (sessionStatus === 'SUCCESS') return 'SUCCESS';
+  if (achievedFlexion != null && targetFlexion != null && achievedFlexion >= targetFlexion) return 'SUCCESS';
+  return 'INCOMPLETE';
 }
 
-// Transform API SessionResponse to SessionRecord
-function transformApiSessions(apiSessions: any[]): SessionRecord[] {
+// Transform API SessionResponse to SessionRecord + MissedRecord
+function transformApiSessions(apiSessions: SessionResponse[]): {
+  sessions: SessionRecord[];
+  missed: MissedRecord[];
+} {
   const dayMap = new Map<string, SessionRecord[]>();
-  
-  apiSessions.forEach((apiSession) => {
-    // Skip ghost sessions (started but never performed — no flexion data recorded)
-    if (apiSession.durationCompleted === 0 && apiSession.actualMaxFlexion === 0) return;
+  const missedByDate = new Map<string, MissedRecord>();
 
+  apiSessions.forEach((apiSession) => {
     const sessionDate = new Date(apiSession.sessionDate);
+    // Compute calendar day/weekday in Bangkok timezone (not device local).
+    const parts = bangkokParts(sessionDate);
     const dateStr = sessionDate.toLocaleDateString('th-TH', {
       year: 'numeric',
       month: 'long',
       day: 'numeric',
+      timeZone: 'Asia/Bangkok',
     });
-    
+    const dayLabel = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'][parts.weekday];
+
+    if (apiSession.kind === 'missed') {
+      // Only register missed for the day; later we'll merge with session list
+      if (!missedByDate.has(dateStr)) {
+        missedByDate.set(dateStr, {
+          id: `missed-${apiSession.planId}-${dateStr}`,
+          date: dateStr,
+          ts: sessionDate.getTime(),
+          dayLabel,
+          targetFlexion: apiSession.plan?.targetFlexion ?? 0,
+          expectedSessions: apiSession.expectedSessions,
+          completedSessions: apiSession.completedSessions,
+        });
+      }
+      return;
+    }
+
+    // Skip ghost sessions (started but never performed — no flexion data recorded)
+    if (apiSession.durationCompleted === 0 && apiSession.actualMaxFlexion === 0) return;
+
     const timeStr = sessionDate.toLocaleTimeString('th-TH', {
       hour: '2-digit',
       minute: '2-digit',
+      timeZone: 'Asia/Bangkok',
     });
-    
-    const dayLabel = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'][sessionDate.getDay()];
-    
+
     // Normalize painLevel coming from session_logs. Backend may store a broader range
     // (e.g., 0, 3, 5, 8). Map them into our UI buckets: 1 (no pain), 2 (moderate), 3 (severe).
-    const rawPain = Number(apiSession.painLevel ?? apiSession.pain_level ?? 1);
+    const rawPain = Number(apiSession.painLevel ?? 1);
     let normalizedPain: 1 | 2 | 3 = 1;
     if (isNaN(rawPain) || rawPain <= 1) {
       normalizedPain = 1;
@@ -160,7 +177,7 @@ function transformApiSessions(apiSessions: any[]): SessionRecord[] {
       dayLabel,
       sessionStatus,
     };
-    
+
     if (!dayMap.has(dateStr)) {
       dayMap.set(dateStr, []);
     }
@@ -178,34 +195,34 @@ function transformApiSessions(apiSessions: any[]): SessionRecord[] {
       result.push(session);
     });
   });
-  
-  return result;
+
+  return { sessions: result, missed: Array.from(missedByDate.values()) };
 }
 
 // Keep MOCK_SESSIONS as fallback for development
-// const MOCK_SESSIONS: SessionRecord[] = [
-//   // 4 มี.ค. — 3/3 ✓
-//   { id: '1a', date: '4 มี.ค. 2568', time: '09:30', ts: Date.now(), sessionNum: 1, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 88, targetFlexion: 85, painLevel: 1, isManual: false, dayLabel: 'ศ.' },
-//   { id: '1b', date: '4 มี.ค. 2568', time: '12:00', ts: Date.now(), sessionNum: 2, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 89, targetFlexion: 85, painLevel: 1, isManual: false, dayLabel: 'ศ.' },
-//   { id: '1c', date: '4 มี.ค. 2568', time: '15:00', ts: Date.now(), sessionNum: 3, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 90, targetFlexion: 85, painLevel: 2, isManual: false, dayLabel: 'ศ.' },
-//   // 3 มี.ค. — 2/3
-//   { id: '2a', date: '3 มี.ค. 2568', time: '09:00', ts: Date.now(), sessionNum: 1, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 85, targetFlexion: 85, painLevel: 2, isManual: true,  dayLabel: 'พฤ.' },
-//   { id: '2b', date: '3 มี.ค. 2568', time: '13:30', ts: Date.now(), sessionNum: 2, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 84, targetFlexion: 85, painLevel: 2, isManual: false, dayLabel: 'พฤ.' },
-//   // 2 มี.ค. — 3/3 ✓
-//   { id: '3a', date: '2 มี.ค. 2568', time: '10:15', ts: Date.now(), sessionNum: 1, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 86, targetFlexion: 85, painLevel: 1, isManual: false, dayLabel: 'พ.' },
-//   { id: '3b', date: '2 มี.ค. 2568', time: '13:00', ts: Date.now(), sessionNum: 2, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 87, targetFlexion: 85, painLevel: 1, isManual: false, dayLabel: 'พ.' },
-//   { id: '3c', date: '2 มี.ค. 2568', time: '16:00', ts: Date.now(), sessionNum: 3, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 88, targetFlexion: 85, painLevel: 1, isManual: false, dayLabel: 'พ.' },
-//   // 1 มี.ค. — 1/3
-//   { id: '4a', date: '1 มี.ค. 2568', time: '16:45', ts: Date.now(), sessionNum: 1, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 82, targetFlexion: 80, painLevel: 2, isManual: false, dayLabel: 'อ.' },
-//   // 28 ก.พ. — 3/3 ✓
-//   { id: '5a', date: '28 ก.พ. 2568', time: '09:00', ts: Date.now(), sessionNum: 1, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 78, targetFlexion: 75, painLevel: 1, isManual: false, dayLabel: 'จ.' },
-//   { id: '5b', date: '28 ก.พ. 2568', time: '12:00', ts: Date.now(), sessionNum: 2, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 79, targetFlexion: 75, painLevel: 1, isManual: true,  dayLabel: 'จ.' },
-//   { id: '5c', date: '28 ก.พ. 2568', time: '15:30', ts: Date.now(), sessionNum: 3, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 80, targetFlexion: 75, painLevel: 1, isManual: false, dayLabel: 'จ.' },
-// ];
+const MOCK_SESSIONS: SessionRecord[] = [
+  // 4 มี.ค. — 3/3 ✓
+  { id: '1a', date: '4 มี.ค. 2568', time: '09:30', ts: Date.now(), sessionNum: 1, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 88, targetFlexion: 85, painLevel: 1, isManual: false, dayLabel: 'ศ.' },
+  { id: '1b', date: '4 มี.ค. 2568', time: '12:00', ts: Date.now(), sessionNum: 2, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 89, targetFlexion: 85, painLevel: 1, isManual: false, dayLabel: 'ศ.' },
+  { id: '1c', date: '4 มี.ค. 2568', time: '15:00', ts: Date.now(), sessionNum: 3, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 90, targetFlexion: 85, painLevel: 2, isManual: false, dayLabel: 'ศ.' },
+  // 3 มี.ค. — 2/3
+  { id: '2a', date: '3 มี.ค. 2568', time: '09:00', ts: Date.now(), sessionNum: 1, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 85, targetFlexion: 85, painLevel: 2, isManual: true,  dayLabel: 'พฤ.' },
+  { id: '2b', date: '3 มี.ค. 2568', time: '13:30', ts: Date.now(), sessionNum: 2, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 84, targetFlexion: 85, painLevel: 2, isManual: false, dayLabel: 'พฤ.' },
+  // 2 มี.ค. — 3/3 ✓
+  { id: '3a', date: '2 มี.ค. 2568', time: '10:15', ts: Date.now(), sessionNum: 1, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 86, targetFlexion: 85, painLevel: 1, isManual: false, dayLabel: 'พ.' },
+  { id: '3b', date: '2 มี.ค. 2568', time: '13:00', ts: Date.now(), sessionNum: 2, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 87, targetFlexion: 85, painLevel: 1, isManual: false, dayLabel: 'พ.' },
+  { id: '3c', date: '2 มี.ค. 2568', time: '16:00', ts: Date.now(), sessionNum: 3, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 88, targetFlexion: 85, painLevel: 1, isManual: false, dayLabel: 'พ.' },
+  // 1 มี.ค. — 1/3
+  { id: '4a', date: '1 มี.ค. 2568', time: '16:45', ts: Date.now(), sessionNum: 1, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 82, targetFlexion: 80, painLevel: 2, isManual: false, dayLabel: 'อ.' },
+  // 28 ก.พ. — 3/3 ✓
+  { id: '5a', date: '28 ก.พ. 2568', time: '09:00', ts: Date.now(), sessionNum: 1, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 78, targetFlexion: 75, painLevel: 1, isManual: false, dayLabel: 'จ.' },
+  { id: '5b', date: '28 ก.พ. 2568', time: '12:00', ts: Date.now(), sessionNum: 2, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 79, targetFlexion: 75, painLevel: 1, isManual: true,  dayLabel: 'จ.' },
+  { id: '5c', date: '28 ก.พ. 2568', time: '15:30', ts: Date.now(), sessionNum: 3, sessionsPerDay: SESSIONS_PER_DAY, achievedFlexion: 80, targetFlexion: 75, painLevel: 1, isManual: false, dayLabel: 'จ.' },
+];
 
-// // Hidden flag to force mock data (useful for offline/manual testing).
-// // Set environment variable `EXPO_PUBLIC_FORCE_MOCK_SESSIONS=1` to enable.
-// const FORCE_MOCK = process.env.EXPO_PUBLIC_FORCE_MOCK_SESSIONS === '1';
+// Hidden flag to force mock data (useful for offline/manual testing).
+// Set environment variable `EXPO_PUBLIC_FORCE_MOCK_SESSIONS=1` to enable.
+const FORCE_MOCK = process.env.EXPO_PUBLIC_FORCE_MOCK_SESSIONS === '1';
 
 // Group sessions by date for display
 interface DayGroup {
@@ -230,10 +247,9 @@ const PAIN_CONFIG: Record<1 | 2 | 3, { emoji: string; label: string; color: stri
   3: { emoji: '😫', label: 'เจ็บมาก', color: DSColors.danger },
 };
 
-const SESSION_STATUS_CONFIG: Record<'SUCCESS' | 'CONTINUE' | 'FAILED', string> = {
+const SESSION_STATUS_CONFIG: Record<'SUCCESS' | 'INCOMPLETE', string> = {
   SUCCESS: DSColors.success,
-  CONTINUE: DSColors.warning,
-  FAILED: DSColors.danger,
+  INCOMPLETE: DSColors.text.secondary,
 };
 
 // ─── Chart config ─────────────────────────────────────────────────────────────
@@ -261,7 +277,7 @@ interface SessionCardProps {
   targetFlexion: number;
   painLevel: 1 | 2 | 3;
   isManual: boolean;
-  sessionStatus?: 'SUCCESS' | 'CONTINUE' | 'FAILED';
+  sessionStatus?: 'SUCCESS';
 }
 
 function SessionCard({ time, sessionNum, sessionsPerDay, achievedFlexion, targetFlexion, painLevel, isManual, sessionStatus }: SessionCardProps) {
@@ -289,7 +305,7 @@ function SessionCard({ time, sessionNum, sessionsPerDay, achievedFlexion, target
             color={isManual ? DSColors.warning : DSColors.success}
           />
           <Text style={[styles.badgeText, { color: statusColor }]}>
-            {resolvedStatus === 'SUCCESS' ? 'สำเร็จ' : resolvedStatus === 'FAILED' ? 'ล้มเหลว' : 'กำลังดำเนินการ'}
+            {resolvedStatus === 'SUCCESS' ? 'สำเร็จ' : 'ยังไม่สำเร็จ'}
           </Text>
         </View>
       </View>
@@ -336,6 +352,7 @@ function SessionCard({ time, sessionNum, sessionsPerDay, achievedFlexion, target
 export default function HistoryScreen() {
   const auth = useAuth();
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
+  const [missed, setMissed] = useState<MissedRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedPeriod, setSelectedPeriod] = useState<Period>('7d');
@@ -344,11 +361,12 @@ export default function HistoryScreen() {
   useEffect(() => {
     async function loadSessions() {
       // If developer explicitly requests mock data, skip API and use local mock.
-      // if (FORCE_MOCK) {
-      //   setSessions(MOCK_SESSIONS);
-      //   setIsLoading(false);
-      //   return;
-      // }
+      if (FORCE_MOCK) {
+        setSessions(MOCK_SESSIONS);
+        setMissed([]);
+        setIsLoading(false);
+        return;
+      }
 
       if (!auth.patientId) {
         setError('Patient ID not found');
@@ -362,15 +380,20 @@ export default function HistoryScreen() {
         const response = await getPatientSessions(auth.patientId);
         if (response.success && response.data) {
           const transformed = transformApiSessions(response.data);
-          setSessions(transformed);
+          setSessions(transformed.sessions);
+          setMissed(transformed.missed);
         } else {
           setError(response.error || 'Failed to fetch sessions');
           // Fall back to mock data if fetch fails
+          setSessions(MOCK_SESSIONS);
+          setMissed([]);
         }
       } catch (err) {
         console.error('Error loading sessions:', err);
         setError('Failed to load session history');
         // Fall back to mock data
+        setSessions(MOCK_SESSIONS);
+        setMissed([]);
       } finally {
         setIsLoading(false);
       }
@@ -381,58 +404,66 @@ export default function HistoryScreen() {
 
   // displaySessions: filtered by period — drives summary stats + session list
   const displaySessions = useMemo(() => {
-    const base = isLoading ? [] : (sessions.length > 0 ? sessions : []);
+    const base = isLoading ? [] : (sessions.length > 0 ? sessions : MOCK_SESSIONS);
     if (selectedPeriod === 'all') return base;
     const days = selectedPeriod === '7d' ? 7 : 30;
     const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
     return base.filter((s) => s.ts >= cutoff);
   }, [isLoading, sessions, selectedPeriod]);
+
+  const displayMissed = useMemo(() => {
+    if (isLoading) return [];
+    if (selectedPeriod === 'all') return missed;
+    const days = selectedPeriod === '7d' ? 7 : 30;
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+    return missed.filter((m) => m.ts >= cutoff);
+  }, [isLoading, missed, selectedPeriod]);
+
   const dayGroups = useMemo(() => groupByDay(displaySessions), [displaySessions]);
 
-  const Y_FLOOR = 50;
-  const Y_CEILING = 130;
+  // Build a lookup of missed by date so session-day rows can show "ยังขาดอีก N ครั้ง"
+  const missedByDate = useMemo(() => {
+    const m = new Map<string, MissedRecord>();
+    displayMissed.forEach((r) => m.set(r.date, r));
+    return m;
+  }, [displayMissed]);
+
+  // Missed-only days (no session on that date at all)
+  const missedOnlyDays = useMemo(() => {
+    const sessionDates = new Set(dayGroups.map((g) => g.date));
+    return displayMissed.filter((m) => !sessionDates.has(m.date));
+  }, [dayGroups, displayMissed]);
+
   const MAX_CHART_POINTS = 10;
 
-  const recentRef = useRef<any[]>([]);
-
   const chartData = useMemo(() => {
-    // Use recent individual sessions (not grouped by day) so X-axis shows ครั้ง N
-    const points = displaySessions.length === 0 ? [] : displaySessions.slice(-MAX_CHART_POINTS);
-    if (points.length === 0) return null;
-    const recent = [...points].reverse(); // oldest→newest from left to right
+    if (dayGroups.length === 0) return null;
+    const reversedGroups = [...dayGroups.slice(0, MAX_CHART_POINTS)].reverse();
 
-    // Build X-axis labels depending on selected period:
-    // - 7d: show 1..7
-    // - 30d: show 1,5,10,15,20,25,30 mapped across available points
-    const labels = Array(recent.length).fill('');
-    recentRef.current = recent;
-    if (selectedPeriod === '7d') {
-      for (let i = 0; i < recent.length; i += 1) labels[i] = `${i + 1}`;
-    } else if (selectedPeriod === '30d') {
-      const ticks = [1, 5, 10, 15, 20, 25, 30];
-      const days = 30;
-      for (const t of ticks) {
-        const idx = Math.round(((t - 1) / (days - 1)) * (recent.length - 1));
-        if (idx >= 0 && idx < labels.length) labels[idx] = `${t}`;
-      }
-    }
-    const actualValues = recent.map((s) => s.achievedFlexion);
-    const targetValues = recent.map((s) => s.targetFlexion || 0);
+    const labels = reversedGroups.map((g) => {
+      const p = bangkokParts(new Date(g.sessions[0].ts));
+      return `${p.day}/${p.month0 + 1}`;
+    });
+    const actualValues = reversedGroups.map((g) => Math.max(...g.sessions.map((s) => s.achievedFlexion)));
+    const targetValues = reversedGroups.map((g) => g.sessions[0].targetFlexion);
+
+    // Dynamic Y range: ±10° padding around the actual data so the chart auto-fits.
+    const allValues = [...actualValues, ...targetValues].filter((v) => Number.isFinite(v));
+    const dataMin = allValues.length > 0 ? Math.min(...allValues) : 50;
+    const dataMax = allValues.length > 0 ? Math.max(...allValues) : 130;
+    const yFloor = Math.max(0, Math.floor(dataMin - 10));
+    const yCeiling = Math.ceil(dataMax + 10);
 
     return {
       labels,
       datasets: [
-        { data: recent.map(() => Y_FLOOR),   color: (): string => 'rgba(0,0,0,0)', strokeWidth: 0 },
-        { data: recent.map(() => Y_CEILING), color: (): string => 'rgba(0,0,0,0)', strokeWidth: 0 },
+        { data: reversedGroups.map(() => yFloor),   color: (): string => 'rgba(0,0,0,0)', strokeWidth: 0 },
+        { data: reversedGroups.map(() => yCeiling), color: (): string => 'rgba(0,0,0,0)', strokeWidth: 0 },
         { data: targetValues, color: (): string => TARGET_LINE_COLOR, strokeWidth: 2, strokeDashArray: [6, 4] },
         { data: actualValues, color: (): string => ACTUAL_LINE_COLOR, strokeWidth: 3 },
       ],
     };
-  }, [displaySessions]);
-
-  const [tooltipVisible, setTooltipVisible] = useState(false);
-  const [tooltipText, setTooltipText] = useState('');
-  const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(null);
+  }, [dayGroups]);
 
   const totalSessions = displaySessions.length;
   const totalDays = dayGroups.length;
@@ -445,9 +476,6 @@ export default function HistoryScreen() {
       >
 
         <PeriodSelector selected={selectedPeriod} onSelect={setSelectedPeriod} />
-  <View style={styles.periodRow}>
-          <Text style={styles.periodTabTextActive}>ทั้งหมด</Text>
-        </View>
 
         {/* ── Summary banner ─────────────────────────────────────────────── */}
         <View style={[styles.summaryCard, DSShadow]}>
@@ -481,48 +509,22 @@ export default function HistoryScreen() {
               }
             </View>
           ) : (
-            <>
-              <View style={{ position: 'relative' }}>
-                <AnyLineChart
-                  data={chartData}
-                  width={CHART_WIDTH}
-                  height={CHART_HEIGHT}
-                  yAxisLabel=""
-                  fromZero={false}
-                  withInnerLines
-                  withOuterLines
-                  chartConfig={makeChartConfig(DSColors.text.secondary, DSColors.borderLight)}
-                  style={styles.chart}
-                  withDots
-                  withVerticalLabels
-                  withHorizontalLabels
-                  onDataPointClick={(dp: any) => {
-                    const idx = dp.index as number;
-                    const s = recentRef.current[idx];
-                    if (!s) return;
-                    const d = new Date(s.ts);
-                    const dateLabel = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}`;
-                    setTooltipText(`ครั้งที่ ${idx + 1}\n(${dateLabel})`);
-                    // dp.x/dp.y are relative coordinates from chart lib
-                    const x = typeof dp.x === 'number' ? dp.x : 0;
-                    const y = typeof dp.y === 'number' ? dp.y : 0;
-                    setTooltipPos({ x, y });
-                    setTooltipVisible(true);
-                    // auto-hide
-                    setTimeout(() => setTooltipVisible(false), 3000);
-                  }}
-                  segments={5}
-                  formatYLabel={(v: string) => `${Math.round(Number(v))}°`}
-                />
-                {tooltipVisible && tooltipPos && (
-                  <View style={{ position: 'absolute', left: Math.max(8, tooltipPos.x - 40), top: Math.max(8, tooltipPos.y - 56), zIndex: 999 }} pointerEvents="none">
-                    <View style={styles.tooltipCard}>
-                      <Text style={styles.tooltipText}>{tooltipText}</Text>
-                    </View>
-                  </View>
-                )}
-              </View>
-            </>
+            <AnyLineChart
+              data={chartData}
+              width={CHART_WIDTH}
+              height={CHART_HEIGHT}
+              yAxisLabel=""
+              fromZero={false}
+              withInnerLines
+              withOuterLines
+              chartConfig={makeChartConfig(DSColors.text.secondary, DSColors.borderLight)}
+              style={styles.chart}
+              withDots
+              withVerticalLabels
+              withHorizontalLabels
+              segments={5}
+              formatYLabel={(v: string) => `${Math.round(Number(v))}°`}
+            />
           )}
 
           <View style={styles.legend}>
@@ -545,8 +547,10 @@ export default function HistoryScreen() {
 
         {dayGroups.map((group) => {
           const completed = group.sessions.length;
-          const perDay = group.sessions[0].sessionsPerDay;
+          const missedForDay = missedByDate.get(group.date);
+          const perDay = missedForDay?.expectedSessions ?? group.sessions[0].sessionsPerDay;
           const allDone = completed >= perDay;
+          const remaining = Math.max(0, perDay - completed);
           return (
             <View key={group.date} style={styles.dayGroup}>
               {/* Day header */}
@@ -566,9 +570,7 @@ export default function HistoryScreen() {
                     const dotStyle = sessionForIndex
                       ? dotStatus === 'SUCCESS'
                         ? styles.dayDotDone
-                        : dotStatus === 'FAILED'
-                          ? styles.dayDotFailed
-                          : styles.dayDotInProgress
+                        : styles.dayDotEmpty
                       : styles.dayDotEmpty;
 
                     return <View key={i} style={[styles.dayDot, dotStyle]} />;
@@ -592,9 +594,38 @@ export default function HistoryScreen() {
                   sessionStatus={session.sessionStatus}
                 />
               ))}
+              {missedForDay && remaining > 0 && (
+                <Text style={styles.missedInlineNote}>
+                  ยังขาดอีก {remaining} ครั้ง
+                </Text>
+              )}
             </View>
           );
         })}
+
+        {/* Missed-only days (no session performed at all) */}
+        {missedOnlyDays.map((m) => (
+          <View key={m.id} style={styles.dayGroup}>
+            <View style={styles.dayHeader}>
+              <View style={styles.dayHeaderLeft}>
+                <Ionicons name="calendar-outline" size={15} color={DSColors.text.secondary} />
+                <Text style={styles.dayHeaderDate}>{m.date}</Text>
+              </View>
+              <View style={styles.dayHeaderRight}>
+                {Array.from({ length: m.expectedSessions }, (_, i) => (
+                  <View key={i} style={[styles.dayDot, styles.dayDotMissed]} />
+                ))}
+                <Text style={styles.dayHeaderCount}>
+                  0/{m.expectedSessions}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.missedCard}>
+              <Ionicons name="close-circle-outline" size={18} color={DSColors.danger} />
+              <Text style={styles.missedCardText}>ไม่ได้ทำตามแผน</Text>
+            </View>
+          </View>
+        ))}
 
         <View style={styles.bottomSpacer} />
       </ScrollView>
@@ -778,16 +809,36 @@ const styles = StyleSheet.create({
   dayDotDone: {
     backgroundColor: DSColors.success,
   },
-  dayDotInProgress: {
-    backgroundColor: DSColors.warning,
-  },
-  dayDotFailed: {
-    backgroundColor: DSColors.danger,
-  },
   dayDotEmpty: {
     backgroundColor: DSColors.borderLight,
     borderWidth: 1,
     borderColor: DSColors.border,
+  },
+  dayDotMissed: {
+    backgroundColor: DSColors.danger,
+    opacity: 0.7,
+  },
+  missedInlineNote: {
+    ...DSTypography.caption,
+    color: DSColors.danger,
+    marginTop: 8,
+    marginLeft: 4,
+  },
+  missedCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    backgroundColor: DSColors.surface,
+    borderRadius: DSShape.radiusCard,
+    borderWidth: 1,
+    borderColor: DSColors.borderLight,
+    marginTop: 8,
+  },
+  missedCardText: {
+    ...DSTypography.body,
+    color: DSColors.text.secondary,
   },
   dayHeaderCount: {
     fontSize: 12,
@@ -926,27 +977,5 @@ const styles = StyleSheet.create({
   },
   periodTabTextActive: {
     color: DSColors.text.inverse,
-  },
-  tooltipOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.35)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  tooltipCard: {
-    backgroundColor: DSColors.surface,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: DSColors.borderLight,
-    maxWidth: 180,
-    alignItems: 'center',
-  },
-  tooltipText: {
-    ...DSTypography.small,
-    color: DSColors.text.primary,
-    textAlign: 'center',
-    lineHeight: 16,
   },
 });
