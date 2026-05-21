@@ -860,7 +860,7 @@ function PatientRow({ item, onOpenPicker }: { item: Patient; onOpenPicker?: (kin
                   <Text style={styles.outlineButtonText}>ยกเลิก</Text>
                 </Pressable>
                 <Pressable onPress={handleDelete} style={[styles.primaryButton, busy && { opacity: 0.6 }]}>
-                  <Text style={styles.primaryButtonText}>{busy ? 'กำลังลบ...' : 'ลบ'}</Text>
+                  <Text style={styles.primaryButtonText}>{busy ? '' : 'ลบ'}</Text>
                 </Pressable>
               </View>
             </View>
@@ -1085,12 +1085,13 @@ const styles = StyleSheet.create({
   editPrimaryButton: {
     backgroundColor: DSColors.primary,
     paddingVertical: 10,
-    paddingHorizontal: 14,
+    paddingHorizontal: 20,
     borderRadius: DSShape.radiusButton,
     alignItems: 'center',
   },
   editPrimaryButtonText: {
     color: '#FFFFFF',
+    textAlign: 'center',
     fontWeight: '700',
   },
   addModalBody: {
@@ -1244,6 +1245,8 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     backgroundColor: DSColors.primary,
+    width: '50%',
+    justifyContent: 'center',
     borderRadius: DSShape.radiusButton,
     alignItems: 'center',
   },
@@ -1252,6 +1255,7 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: {
     color: '#FFFFFF',
+    justifyContent: 'center',
     fontWeight: '700',
   },
   pressed: { opacity: 0.8 },

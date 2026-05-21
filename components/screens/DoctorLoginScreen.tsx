@@ -4,7 +4,7 @@
 
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
-import { Alert, Pressable, TextInput, View } from 'react-native';
+import { Alert, Pressable, Text, TextInput, View } from 'react-native';
 
 import {
   LoginBackRow,
@@ -32,6 +32,7 @@ export function DoctorLoginScreen({ onSuccess, onBack }: DoctorLoginScreenProps)
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
 
   const valid =
     email.trim().length >= MIN_EMAIL && password.length >= MIN_PASS;
@@ -40,11 +41,17 @@ export function DoctorLoginScreen({ onSuccess, onBack }: DoctorLoginScreenProps)
     if (!valid || isLoading) return;
 
     setIsLoading(true);
+    setErrorMessage('');
     try {
       await onSuccess?.(email.trim(), password);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'เข้าสู่ระบบไม่สำเร็จ';
-      Alert.alert('เข้าสู่ระบบล้มเหลว', message);
+      const normalized = String(message).toLowerCase();
+      const uiMessage =
+        normalized.includes('invalid email or password') || normalized.includes('401')
+          ? 'อีเมลหรือรหัสผ่านผิด'
+          : message;
+      setErrorMessage(uiMessage);
     } finally {
       setIsLoading(false);
     }
@@ -122,6 +129,12 @@ export function DoctorLoginScreen({ onSuccess, onBack }: DoctorLoginScreenProps)
         disabled={!valid || isLoading}
         onPress={handleLogin}
       />
+
+      {errorMessage ? (
+        <Text style={{ marginTop: 12, textAlign: 'center', color: '#B91C1C', fontSize: 14, lineHeight: 20 }}>
+          {errorMessage}
+        </Text>
+      ) : null}
     </LoginScreenShell>
   );
 }
