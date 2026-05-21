@@ -46,6 +46,21 @@ function sanitizePositiveInteger(rawValue: string, maxDigits: number) {
   return rawValue.replace(/\D/g, '').slice(0, maxDigits);
 }
 
+function RequiredFieldLabel({
+  children,
+  style,
+}: {
+  children: React.ReactNode;
+  style?: object;
+}) {
+  return (
+    <Text style={[styles.fieldLabel, style]}>
+      {children}
+      <Text style={{ color: DSColors.danger }}> *</Text>
+    </Text>
+  );
+}
+
 const REALISTIC_LIMITS = {
   flexion: { min: 0, max: 135 },
   extension: { min: 0, max: 180 },
@@ -239,68 +254,141 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
     }
     setIsSaving(true);
     try {
-      // validate dates and sessions
       const dateRe = /^\d{4}-\d{2}-\d{2}$/;
-      if (planStart && !dateRe.test(planStart)) {
-        setPlanError('Start date must be YYYY-MM-DD');
+      const startTrim = planStart.trim();
+      const endTrim = planEnd.trim();
+
+      if (!startTrim) {
+        setPlanError('กรุณาเลือกวันที่เริ่มต้นแผน');
         setIsSaving(false);
         return;
       }
-      if (planEnd && !dateRe.test(planEnd)) {
-        setPlanError('End date must be YYYY-MM-DD');
+      if (!endTrim) {
+        setPlanError('กรุณาเลือกวันที่สิ้นสุดแผน');
         setIsSaving(false);
         return;
       }
-      if (planStart && planEnd) {
-        const s = new Date(planStart).getTime();
-        const e = new Date(planEnd).getTime();
-        if (Number.isNaN(s) || Number.isNaN(e) || s > e) {
-          setPlanError('Start date must be before or equal to end date');
-          setIsSaving(false);
-          return;
-        }
+      if (!dateRe.test(startTrim)) {
+        setPlanError('รูปแบบวันที่เริ่มต้นไม่ถูกต้อง (YYYY-MM-DD)');
+        setIsSaving(false);
+        return;
       }
-      const sessionsNum = Number(sessionsPerDay) || 0;
-      if (sessionsPerDay && (Number.isNaN(sessionsNum) || sessionsNum <= 0 || sessionsNum > 3)) {
-        setPlanError('Sessions per day must be between 1 and 3');
+      if (!dateRe.test(endTrim)) {
+        setPlanError('รูปแบบวันที่สิ้นสุดไม่ถูกต้อง (YYYY-MM-DD)');
+        setIsSaving(false);
+        return;
+      }
+      const s = new Date(startTrim).getTime();
+      const e = new Date(endTrim).getTime();
+      if (Number.isNaN(s) || Number.isNaN(e) || s > e) {
+        setPlanError('วันที่เริ่มต้นต้องไม่เกินวันที่สิ้นสุด');
         setIsSaving(false);
         return;
       }
 
-      const flexionValue = Number(targetFlexion);
+      const sessionsTrim = sessionsPerDay.trim();
+      if (!sessionsTrim) {
+        setPlanError('กรุณากรอกจำนวนครั้งต่อวัน');
+        setIsSaving(false);
+        return;
+      }
+      const sessionsNum = Number(sessionsTrim);
+      if (Number.isNaN(sessionsNum) || sessionsNum < 1 || sessionsNum > 3) {
+        setPlanError('จำนวนครั้งต่อวันต้องอยู่ระหว่าง 1–3');
+        setIsSaving(false);
+        return;
+      }
+
+      const days = daysOfWeek.reduce<number[]>((acc, v, i) => (v ? acc.concat(i) : acc), []);
+      if (days.length === 0) {
+        setPlanError('กรุณาเลือกวันในสัปดาห์อย่างน้อย 1 วัน');
+        setIsSaving(false);
+        return;
+      }
+      const allowed = getAllowedWeekdays(startTrim, endTrim);
+      if (!days.some((d) => allowed[d])) {
+        setPlanError('วันที่เลือกในสัปดาห์ไม่ตรงกับช่วงวันที่แผน');
+        setIsSaving(false);
+        return;
+      }
+
+      const flexionTrim = targetFlexion.trim();
+      if (!flexionTrim) {
+        setPlanError('กรุณากรอกองศา Flexion เป้าหมาย');
+        setIsSaving(false);
+        return;
+      }
+      const flexionValue = Number(flexionTrim);
       if (Number.isNaN(flexionValue) || flexionValue < REALISTIC_LIMITS.flexion.min || flexionValue > REALISTIC_LIMITS.flexion.max) {
-        setPlanError(`Target Flexion must be between ${REALISTIC_LIMITS.flexion.min} and ${REALISTIC_LIMITS.flexion.max}`);
+        setPlanError(`องศา Flexion ต้องอยู่ระหว่าง ${REALISTIC_LIMITS.flexion.min}–${REALISTIC_LIMITS.flexion.max}°`);
         setIsSaving(false);
         return;
       }
 
-      const extensionValue = Number(targetExtension);
+      const extensionTrim = targetExtension.trim();
+      if (extensionTrim === '') {
+        setPlanError('กรุณากรอกองศา Extension เป้าหมาย');
+        setIsSaving(false);
+        return;
+      }
+      const extensionValue = Number(extensionTrim);
       if (Number.isNaN(extensionValue) || extensionValue < REALISTIC_LIMITS.extension.min || extensionValue > REALISTIC_LIMITS.extension.max) {
-        setPlanError(`Target Extension must be between ${REALISTIC_LIMITS.extension.min} and ${REALISTIC_LIMITS.extension.max}`);
+        setPlanError(`องศา Extension ต้องอยู่ระหว่าง ${REALISTIC_LIMITS.extension.min}–${REALISTIC_LIMITS.extension.max}°`);
         setIsSaving(false);
         return;
       }
 
-      const speedValue = Number(speedLevel);
+      const speedTrim = speedLevel.trim();
+      if (!speedTrim) {
+        setPlanError('กรุณากรอกความเร็ว');
+        setIsSaving(false);
+        return;
+      }
+      const speedValue = Number(speedTrim);
       if (Number.isNaN(speedValue) || speedValue < REALISTIC_LIMITS.speed.min || speedValue > REALISTIC_LIMITS.speed.max) {
-        setPlanError('Speed must be between 1 and 10');
+        setPlanError(`ความเร็วต้องอยู่ระหว่าง ${REALISTIC_LIMITS.speed.min}–${REALISTIC_LIMITS.speed.max}`);
+        setIsSaving(false);
+        return;
+      }
+
+      const durationTrim = durationMinutes.trim();
+      if (!durationTrim) {
+        setPlanError('กรุณากรอกระยะเวลา (นาที)');
+        setIsSaving(false);
+        return;
+      }
+      const durationNum = Number(durationTrim);
+      if (Number.isNaN(durationNum) || durationNum < 1) {
+        setPlanError('ระยะเวลาต้องอย่างน้อย 1 นาที');
+        setIsSaving(false);
+        return;
+      }
+
+      const forceTrim = targetForceN.trim();
+      if (!forceTrim) {
+        setPlanError('กรุณากรอกแรงต้านสูงสุด (N)');
+        setIsSaving(false);
+        return;
+      }
+      const forceValue = Number(forceTrim);
+      if (Number.isNaN(forceValue) || forceValue <= 0) {
+        setPlanError('แรงต้านสูงสุด (N) ต้องมากกว่า 0');
         setIsSaving(false);
         return;
       }
 
       setPlanError(null);
-      const days = daysOfWeek.reduce<number[]>((acc, v, i) => (v ? acc.concat(i) : acc), []);
       const payload = {
         flexion: flexionValue,
         extension: extensionValue,
         speed: speedValue,
-        duration: Number(durationMinutes) || 10,
+        duration: durationNum,
         warmUp: useWarmup,
         forceLevel: 5,
-        targetForceN: Number(targetForceN) || 50,
-        startDate: planStart || null,
-        endDate: planEnd || null,
-        sessionsPerDay: sessionsNum || 1,
+        targetForceN: forceValue,
+        startDate: startTrim,
+        endDate: endTrim,
+        sessionsPerDay: sessionsNum,
         daysOfWeek: days,
       };
 
@@ -488,7 +576,7 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
   const planFormContent = (
     <>
       <View style={{ marginBottom: 8 }}>
-        <Text style={styles.fieldLabel}>Plan range</Text>
+        <RequiredFieldLabel>ช่วงวันที่แผน (Plan range)</RequiredFieldLabel>
         <Pressable
           onPress={() => setShowRangePicker(true)}
           style={[styles.input, { justifyContent: 'center', minHeight: 48 }]}
@@ -501,7 +589,7 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
 
       <View style={{ flexDirection: isNarrow ? 'column' : 'row', gap: 8, alignItems: 'flex-start', marginBottom: 12 }}>
         <View style={isNarrow ? { width: '100%' } : { width: 160 }}>
-          <Text style={styles.fieldLabel}>Sessions / day</Text>
+          <RequiredFieldLabel>จำนวนครั้งต่อวัน (Sessions / day)</RequiredFieldLabel>
           <TextInput
             value={sessionsPerDay}
             onChangeText={(t) => {
@@ -517,7 +605,7 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
           />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={[styles.fieldLabel, { marginBottom: 6 }]}>Days of week</Text>
+          <RequiredFieldLabel style={{ marginBottom: 6 }}>วันในสัปดาห์ (Days of week)</RequiredFieldLabel>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
             {['Su','Mo','Tu','We','Th','Fr','Sa'].map((label, idx) => {
               const allowed = getAllowedWeekdays(planStart, planEnd)[idx];
@@ -548,27 +636,27 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
       <Text style={{ ...DSTypography.caption, color: DSColors.text.secondary, marginBottom: 6 }}>PRESCRIPTION (PHASE 1)</Text>
       <View style={{ flexDirection: isNarrow ? 'column' : 'row', gap: 8, marginBottom: 8 }}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.fieldLabel}>Target Flexion (°)</Text>
+          <RequiredFieldLabel>องศา Flexion เป้าหมาย (°)</RequiredFieldLabel>
           <TextInput value={targetFlexion} onChangeText={(v) => setTargetFlexion(clampNumber(v, REALISTIC_LIMITS.flexion.min, REALISTIC_LIMITS.flexion.max))} style={styles.input} keyboardType="numeric" maxLength={3} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={styles.fieldLabel}>Target Extension (°)</Text>
+          <RequiredFieldLabel>องศา Extension เป้าหมาย (°)</RequiredFieldLabel>
           <TextInput value={targetExtension} onChangeText={(v) => setTargetExtension(clampNumber(v, REALISTIC_LIMITS.extension.min, REALISTIC_LIMITS.extension.max))} style={styles.input} keyboardType="numeric" maxLength={4} />
         </View>
       </View>
 
       <View style={{ flexDirection: isNarrow ? 'column' : 'row', gap: 8, marginBottom: 8 }}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.fieldLabel}>Speed (1–10)</Text>
+          <RequiredFieldLabel>ความเร็ว (1–10)</RequiredFieldLabel>
           <TextInput value={speedLevel} onChangeText={(v) => setSpeedLevel(clampNumber(v, REALISTIC_LIMITS.speed.min, REALISTIC_LIMITS.speed.max))} style={styles.input} keyboardType="numeric" maxLength={2} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={styles.fieldLabel}>Duration (min)</Text>
+          <RequiredFieldLabel>ระยะเวลา (นาที)</RequiredFieldLabel>
           <TextInput value={durationMinutes} onChangeText={setDurationMinutes} style={styles.input} keyboardType="numeric" />
         </View>
       </View>
 
-      <Text style={styles.fieldLabel}>Max Resistance Force (N) — เพดานสูงสุด (= Level 10)</Text>
+      <RequiredFieldLabel>แรงต้านสูงสุด (N) — เพดาน Level 10</RequiredFieldLabel>
       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
         <TextInput value={targetForceN} onChangeText={setTargetForceN} style={[styles.input, { flex: 1 }]} keyboardType="numeric" />
       </View>
@@ -578,7 +666,10 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
 
       <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12 }}>
         <Switch value={useWarmup} onValueChange={setUseWarmup} />
-        <Text style={{ marginLeft: 8 }}>Warm-up mode</Text>
+        <Text style={{ marginLeft: 8, ...DSTypography.body, color: DSColors.text.primary }}>
+          โหมดวอร์มอัพ (Warm-up)
+          <Text style={{ color: DSColors.danger }}> *</Text>
+        </Text>
       </View>
 
       {planError && <Text style={{ color: DSColors.danger, marginBottom: 8 }}>{planError}</Text>}

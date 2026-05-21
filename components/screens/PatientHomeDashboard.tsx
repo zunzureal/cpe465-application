@@ -1191,20 +1191,18 @@ const styles = StyleSheet.create({
     backgroundColor: DSColors.success,
     gap: 8,
     borderRadius: DSShape.radiusButton,
-    paddingVertical: 16,
+    paddingVertical: 10,
     paddingHorizontal: 24,
   },
   startSessionCtaActive: {
     backgroundColor: DSColors.primary,
-  },
-  startSessionCtaText: {
-    ...DSTypography.bodyBold,
-    backgroundColor: DSColors.primary,
-    textAlign: 'center',
     gap: 8,
     paddingVertical: 16,
     paddingHorizontal: 24,
-    borderRadius: DSShape.radiusButton,
+  },
+  startSessionCtaText: {
+    ...DSTypography.bodyBold,
+  
     color: '#ffffff',
     fontSize: 18,
   },
