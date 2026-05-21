@@ -74,18 +74,18 @@ async function apiCall<T>(
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => '');
-      let errorData = 'Unknown error';
+      let userMessage = 'Unknown error';
       try {
-        errorData = errorText ? JSON.parse(errorText).error || errorText : 'Unknown error';
+        const parsed = errorText ? JSON.parse(errorText) : null;
+        userMessage = parsed?.error || parsed?.message || errorText || response.statusText || 'Unknown error';
       } catch (e) {
-        errorData = errorText || response.statusText || 'Unknown error';
+        userMessage = errorText || response.statusText || 'Unknown error';
       }
       const url = response.url || `${API_BASE}${endpoint}`;
-      const errMsg = `HTTP ${response.status} ${response.statusText} at ${url}: ${errorData}`;
-      console.error('[apiCall] request failed:', errMsg);
+      console.error('[apiCall] request failed:', `HTTP ${response.status} at ${url}:`, userMessage);
       return {
         success: false,
-        error: errMsg,
+        error: userMessage,
       };
     }
 
@@ -161,21 +161,45 @@ export interface CreatePatientPayload {
 export async function createPatient(
   authToken: string,
   body: CreatePatientPayload
-): Promise<ApiResponse<{ patientId: number }>> {
-  return apiCall<{ patientId: number }>('/api/patients', {
+): Promise<ApiResponse<{ patient: DoctorPatient; existing?: boolean }>> {
+  const payload = {
+    hospitalNumber: body.hospitalNumber ?? body.hnCode ?? '',
+    name: body.name,
+    age: body.age,
+    phoneNumber: body.phoneNumber,
+    gender: body.gender,
+  };
+  return apiCall<{ patient: DoctorPatient; existing?: boolean }>('/api/patients', {
     method: 'POST',
-    body,
+    body: payload,
   }, authToken);
 }
 
 /**
  * Get a single patient (doctor only)
  */
+export type DoctorPatientDetail = {
+  id: number;
+  name: string;
+  hnCode: string;
+  age?: number;
+  phoneNumber?: string;
+  gender?: string;
+};
+
 export async function getDoctorPatient(
   authToken: string,
   patientId: number
-): Promise<ApiResponse<{ id: number; name: string; hnCode: string; age?: number; phoneNumber?: string; gender?: string }>> {
-  return apiCall(`/api/patients/${patientId}`, {}, authToken);
+): Promise<ApiResponse<DoctorPatientDetail>> {
+  const res = await apiCall<DoctorPatientDetail | { patient: DoctorPatientDetail }>(
+    `/api/patients/${patientId}`,
+    {},
+    authToken
+  );
+  if (!res.success || !res.data) return res as ApiResponse<DoctorPatientDetail>;
+  const raw = res.data as DoctorPatientDetail | { patient: DoctorPatientDetail };
+  const detail = 'patient' in raw && raw.patient ? raw.patient : (raw as DoctorPatientDetail);
+  return { success: true, data: detail };
 }
 
 export interface UpdatePatientPayload {
@@ -193,14 +217,8 @@ export async function updatePatient(
   authToken: string,
   patientId: number,
   body: UpdatePatientPayload
-): Promise<ApiResponse<{ id: number }>> {
-  try {
-    const url = `${API_BASE}/api/patients/${patientId}`;
-    console.error(`[api] PUT ${url} payload:`, body);
-  } catch (e) {
-    // ignore
-  }
-  return apiCall<{ id: number }>(`/api/patients/${patientId}`, {
+): Promise<ApiResponse<{ id: number; gender?: string; name?: string; hnCode?: string; age?: number; phoneNumber?: string }>> {
+  return apiCall<{ id: number; gender?: string; name?: string; hnCode?: string; age?: number; phoneNumber?: string }>(`/api/patients/${patientId}`, {
     method: 'PUT',
     body,
   }, authToken);

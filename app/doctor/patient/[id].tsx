@@ -47,8 +47,8 @@ function sanitizePositiveInteger(rawValue: string, maxDigits: number) {
 }
 
 const REALISTIC_LIMITS = {
-  flexion: { min: 0, max: 180 },
-  extension: { min: -30, max: 30 },
+  flexion: { min: 0, max: 135 },
+  extension: { min: 0, max: 180 },
   speed: { min: 1, max: 10 },
   forceLevel: { min: 1, max: 10 },
 } as const;
@@ -134,6 +134,7 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
   const [isSaving, setIsSaving] = useState(false);
   const [patientName, setPatientName] = useState<string | null>(null);
   const [patientHn, setPatientHn] = useState<string | null>(null);
+  const [patientGender, setPatientGender] = useState<string | null>(null);
   // Preset fields
   const [targetFlexion, setTargetFlexion] = useState<string>('120');
   const [targetExtension, setTargetExtension] = useState<string>('0');
@@ -179,6 +180,7 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
       if (res.success && res.data) {
         setPatientName((res.data as any).name ?? null);
         setPatientHn((res.data as any).hnCode ?? null);
+        setPatientGender((res.data as any).gender ?? null);
       }
     }
     fetchPatient();
@@ -191,7 +193,7 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
       if (presetRes.success && presetRes.data) {
         const p = presetRes.data as any;
         setExistingPlan(p);
-        setTargetFlexion(clampNumber(String(p.targetFlexion ?? 120), REALISTIC_LIMITS.flexion.min, REALISTIC_LIMITS.flexion.max));
+        setTargetFlexion(clampNumber(String(p.targetFlexion ?? 135), REALISTIC_LIMITS.flexion.min, REALISTIC_LIMITS.flexion.max));
         setTargetExtension(clampNumber(String(p.targetExtension ?? 0), REALISTIC_LIMITS.extension.min, REALISTIC_LIMITS.extension.max));
         setSpeedLevel(clampNumber(String(p.speedLevel ?? 5), REALISTIC_LIMITS.speed.min, REALISTIC_LIMITS.speed.max));
         setDurationMinutes(String(p.durationMinutes ?? 10));
@@ -289,22 +291,8 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
       setPlanError(null);
       const days = daysOfWeek.reduce<number[]>((acc, v, i) => (v ? acc.concat(i) : acc), []);
       const payload: any = {
-        flexion: flexionValue,
-        extension: extensionValue,
-        speed: speedValue,
-        duration: Number(durationMinutes) || 10,
-        warmUp: Boolean(useWarmup),
-        targetForceN: targetForceN ? Number(targetForceN) : null,
-        // forceLevel is the patient-side scaling ceiling. Doctor only sets targetForceN;
-        // we always send 10 so the patient app interprets targetForceN as Level 10.
-        forceLevel: 10,
-        // Send startDate as start-of-day and endDate as end-of-day so that
-        // single-day ranges (start === end) cover the full day instead of
-        // collapsing to 00:00-00:00. Date strings are local YYYY-MM-DD.
-        startDate: planStart ? `${planStart}T00:00:00.000` : undefined,
-        endDate: planEnd ? `${planEnd}T23:59:59.999` : undefined,
-        sessionsPerDay: Number(sessionsPerDay) || 1,
-        daysOfWeek: days.length ? days : undefined,
+        // ...existing code...
+        gender: patientGender,
       };
 
       const res = await putPatientPreset(authToken!, patientId, payload);

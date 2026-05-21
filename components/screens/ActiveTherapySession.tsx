@@ -824,7 +824,7 @@ export function ActiveTherapySession({ isManualMode = false, manualOverrides }: 
   if (sessionState === 'FINISHED') {
     const completed = timeCompletedRef.current;
     const maxFlex = maxFlexionRef.current;
-    const maxForce = atMaxForce.valueOf;
+    const maxForce = actualMaxForceNRef.current;
 
     // Step 1: Ask for pain level, then submit
     if (postResultStatus !== 'success') {
