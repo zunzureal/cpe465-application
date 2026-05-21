@@ -290,9 +290,18 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
 
       setPlanError(null);
       const days = daysOfWeek.reduce<number[]>((acc, v, i) => (v ? acc.concat(i) : acc), []);
-      const payload: any = {
-        // ...existing code...
-        gender: patientGender,
+      const payload = {
+        flexion: flexionValue,
+        extension: extensionValue,
+        speed: speedValue,
+        duration: Number(durationMinutes) || 10,
+        warmUp: useWarmup,
+        forceLevel: 5,
+        targetForceN: Number(targetForceN) || 50,
+        startDate: planStart || null,
+        endDate: planEnd || null,
+        sessionsPerDay: sessionsNum || 1,
+        daysOfWeek: days,
       };
 
       const res = await putPatientPreset(authToken!, patientId, payload);

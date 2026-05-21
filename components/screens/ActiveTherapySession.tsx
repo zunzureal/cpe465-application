@@ -246,7 +246,17 @@ export function ActiveTherapySession({ isManualMode = false, manualOverrides }: 
         if (cancelled) return;
 
         if (!response.success) {
-          throw new Error(response.error || 'Failed to fetch presets');
+          setPresetError(response.error || 'ไม่สามารถโหลดแผนการรักษาได้');
+          setActivePlanId(null);
+          setDoctorPresets(DEFAULT_PRESETS);
+          return;
+        }
+
+        if (!response.data) {
+          setPresetError('ยังไม่มีแผนการรักษาที่ใช้งานอยู่ กรุณาติดต่อแพทย์เพื่อกำหนดแผน');
+          setActivePlanId(null);
+          setDoctorPresets(DEFAULT_PRESETS);
+          return;
         }
 
         const data = response.data as TreatmentPlanResponse;

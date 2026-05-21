@@ -251,18 +251,40 @@ export async function deleteTreatmentPlan(
 }
 
 export interface PutPatientPresetPayload {
-  targetFlexion: number;
+  /** API field names (preferred) */
+  flexion?: number;
+  extension?: number;
+  speed?: number;
+  duration?: number;
+  warmUp?: boolean;
+  /** Legacy / form aliases — mapped to API names in putPatientPreset */
+  targetFlexion?: number;
   targetExtension?: number;
   speedLevel?: number;
   durationMinutes?: number;
   useWarmup?: boolean;
   targetForceN?: number | null;
   forceLevel?: number | null;
-  // optional scheduling fields
-  startDate?: string;
-  endDate?: string;
+  startDate?: string | null;
+  endDate?: string | null;
   sessionsPerDay?: number;
-  daysOfWeek?: number[]; // 0=Sunday..6=Saturday
+  daysOfWeek?: number[];
+}
+
+function toPresetApiBody(body: PutPatientPresetPayload): Record<string, unknown> {
+  return {
+    flexion: body.flexion ?? body.targetFlexion,
+    extension: body.extension ?? body.targetExtension,
+    speed: body.speed ?? body.speedLevel,
+    duration: body.duration ?? body.durationMinutes,
+    warmUp: body.warmUp ?? body.useWarmup,
+    forceLevel: body.forceLevel,
+    targetForceN: body.targetForceN,
+    startDate: body.startDate ?? null,
+    endDate: body.endDate ?? null,
+    sessionsPerDay: body.sessionsPerDay,
+    daysOfWeek: body.daysOfWeek ?? [],
+  };
 }
 
 /**
@@ -275,7 +297,7 @@ export async function putPatientPreset(
 ): Promise<ApiResponse<TreatmentPlanResponse>> {
   return apiCall<TreatmentPlanResponse>(`/api/patients/${patientId}/preset`, {
     method: 'PUT',
-    body,
+    body: toPresetApiBody(body),
   }, authToken);
 }
 
@@ -332,13 +354,58 @@ export interface TreatmentPlanResponse {
   daysOfWeek?: number[]; // 0=Sunday..6=Saturday
 }
 
+/** 404 when patient has no ACTIVE plan yet — normal, not a failure */
+function isNoActivePlanError(status: number, message: string): boolean {
+  return (
+    status === 404 &&
+    (message.includes('No active plan') || message.includes('No active preset'))
+  );
+}
+
 /**
- * Get the latest active treatment plan preset for a patient (no auth required for now)
+ * Get the latest active treatment plan preset for a patient (no auth required for now).
+ * Returns success with data: null when there is no ACTIVE plan (not an error).
  */
 export async function getPatientPreset(
   patientId: number
-): Promise<ApiResponse<TreatmentPlanResponse>> {
-  return apiCall<TreatmentPlanResponse>(`/api/presets/${patientId}`);
+): Promise<ApiResponse<TreatmentPlanResponse | null>> {
+  try {
+    const fullUrl = `${API_BASE}/api/presets/${patientId}`;
+    const response = await fetch(fullUrl, {
+      headers: { Accept: 'application/json' },
+    });
+
+    const bodyText = await response.text().catch(() => '');
+    let parsed: Record<string, unknown> | null = null;
+    try {
+      parsed = bodyText ? JSON.parse(bodyText) : null;
+    } catch {
+      parsed = null;
+    }
+    const userMessage = String(
+      parsed?.error || parsed?.message || bodyText || response.statusText || 'Unknown error'
+    );
+
+    if (!response.ok) {
+      if (isNoActivePlanError(response.status, userMessage)) {
+        return { success: true, data: null };
+      }
+      console.error(
+        '[apiCall] request failed:',
+        `HTTP ${response.status} at ${fullUrl}:`,
+        userMessage
+      );
+      return { success: false, error: userMessage };
+    }
+
+    if (parsed && parsed.plan === null) {
+      return { success: true, data: null };
+    }
+    return { success: true, data: parsed as TreatmentPlanResponse };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Network error';
+    return { success: false, error: message };
+  }
 }
 
 // Delete patient (doctor only) — server may not implement this; call will return error if unavailable
