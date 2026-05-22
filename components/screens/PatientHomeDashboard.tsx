@@ -84,9 +84,27 @@ const DAY_HEADERS = ['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'];
 // All date keys in this file are YYYY-MM-DD in Asia/Bangkok timezone.
 const toDateKey = toBangkokDateKey;
 
+// Backend may omit the `kind` discriminator on freshly-created sessions, so we
+// can't rely on `kind === 'session'` alone — that would silently drop every
+// entry and wipe the calendar/weekly pips. Infer the type from the fields that
+// are present instead.
+function isRealSession(s: any): boolean {
+  if (s?.kind === 'session') return true;
+  if (s?.kind === 'missed') return false;
+  // No kind: treat as a real session when it carries result data and isn't MISSED.
+  const status = String(s?.sessionStatus ?? s?.status ?? '').toUpperCase();
+  if (status === 'MISSED') return false;
+  return s?.actualMaxFlexion != null || s?.durationCompleted != null || s?.id != null;
+}
+
+function isMissedEntry(s: any): boolean {
+  if (s?.kind === 'missed') return true;
+  return String(s?.sessionStatus ?? '').toUpperCase() === 'MISSED' && !isRealSession(s);
+}
+
 function buildSessionCountsByDate(sessions: SessionResponse[]): Record<string, number> {
   return sessions.reduce<Record<string, number>>((acc, session) => {
-    if (session.kind !== 'session') return acc;
+    if (!isRealSession(session)) return acc;
     const key = toDateKey(new Date(session.sessionDate));
     acc[key] = (acc[key] ?? 0) + 1;
     return acc;
@@ -112,15 +130,15 @@ function buildSessionStatusesByDate(sessions: SessionResponse[]): Record<string,
   // Recording every session entry (not just successes) ensures the calendar shows
   // a dot for days where the user attempted a session, even if it didn't reach target.
   sessions.forEach((session) => {
-    if (session.kind === 'session') {
+    if (isRealSession(session)) {
       const key = toDateKey(new Date(session.sessionDate));
       if (!acc[key]) acc[key] = [];
-      acc[key].push(isSessionSuccess(session) ? 'SUCCESS' : 'MISSED');
+      acc[key].push(isSessionSuccess(session as any) ? 'SUCCESS' : 'MISSED');
     }
   });
   // Second pass: synthesize MISSED for days that had no session entries at all.
   sessions.forEach((session) => {
-    if (session.kind === 'missed') {
+    if (isMissedEntry(session)) {
       const key = toDateKey(new Date(session.sessionDate));
       const existing = acc[key];
       if (!existing || existing.length === 0) {
@@ -227,11 +245,12 @@ function CalendarWidget({ sessionStatusesByDate, sessionsPerDay, schedule }: Cal
     }
     return true;
   };
-  // Summary counts for the month header
+  // Summary counts for the month header — count only SUCCESS sessions so the
+  // figures match the "ทำแล้ว" label (MISSED entries are excluded).
   const daysWithSessions = Array.from({ length: daysInMonth }, (_, i) => i + 1)
-    .filter(d => getStatuses(d).length > 0).length;
+    .filter(d => getStatuses(d).some(s => s === 'SUCCESS')).length;
   const totalSessions = Array.from({ length: daysInMonth }, (_, i) => i + 1)
-    .reduce((sum, d) => sum + getStatuses(d).length, 0);
+    .reduce((sum, d) => sum + getStatuses(d).filter(s => s === 'SUCCESS').length, 0);
 
   const flatCells: (number | null)[] = [
     ...Array(firstDayOfWeek).fill(null),
@@ -638,7 +657,7 @@ export function PatientHomeDashboard() {
         const todayKey = todayBangkokKey();
         const todaySessionsFromList = sessionsResponse.success && sessionsResponse.data
           ? sessionsResponse.data.filter(
-              (s) => s.kind === 'session' && toBangkokDateKey(s.sessionDate) === todayKey,
+              (s) => isRealSession(s) && toBangkokDateKey(s.sessionDate) === todayKey,
             ).length
           : 0;
         const todaySessionsPerDay =
@@ -659,10 +678,9 @@ export function PatientHomeDashboard() {
       .catch((err) => {
         if (!cancelled) {
           console.warn('[PatientHomeDashboard] Fetch error:', err);
-          setPlanState('noPlan');
-          setSessionCountsByDate({});
-          setSessionStatusesByDate({});
-          setWeeklyPlan({});
+          // Don't wipe history on a transient fetch failure — keep the last
+          // good counts/statuses/weeklyPlan so the pips don't vanish.
+          setPlanState((prev) => (prev === 'loading' ? 'noPlan' : prev));
         }
       });
 

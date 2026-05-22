@@ -906,10 +906,6 @@ export function ActiveTherapySession({ isManualMode = false, manualOverrides }: 
               <Text style={styles.summaryLabel}>งอเข่าสูงสุด</Text>
               <Text style={styles.summaryValue}>{maxFlex}°</Text>
             </View>
-             <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>งอเข่าสูงสุด</Text>
-              <Text style={styles.summaryValue}>{}°</Text>
-            </View>
           </View>
 
           <TouchableOpacity activeOpacity={0.7} style={styles.backButton} onPress={() => router.back()}>
