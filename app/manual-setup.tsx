@@ -212,9 +212,9 @@ export default function ManualSetupScreen() {
             sublabel="รวมเวลาทั้งเซสชัน"
             value={durationMinutes}
             unit="นาที"
-            onMinus={() => setDurationMinutes(p => Math.max(5, p - STEP_DURATION))}
+            onMinus={() => setDurationMinutes(p => Math.max(1, p - STEP_DURATION))}
             onPlus={() => setDurationMinutes(p => Math.min(60, p + STEP_DURATION))}
-            atMin={durationMinutes <= 5}
+            atMin={durationMinutes <= 1}
             atMax={durationMinutes >= 60}
           />
           <StepperRow

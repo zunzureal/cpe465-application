@@ -447,31 +447,6 @@ export function ActiveTherapySession({ isManualMode = false, manualOverrides }: 
     isManualMode,
   ]);
 
-  const handleFinishSession = useCallback(() => {
-    void sendSessionComplete({
-      timeLeftSeconds: timeLeft,
-      targetFlexion,
-      targetExtension: targetExtensionRef.current,
-      targetForceN: targetForceNRef.current,
-      speed: targetSpeedRef.current,
-      durationMinutes: presets.durationMinutes,
-    });
-    const durationSeconds = presets.durationMinutes * 60;
-    const elapsed = durationSeconds - timeLeft;
-    const completed = Math.max(0, elapsed);
-    const maxFlexion = targetFlexion;
-    const maxForceN = targetForceNRef.current;
-    setSessionSummary({
-      completed,
-      maxFlexion,
-      maxForceN,
-    });
-    timeCompletedRef.current = completed;
-    maxFlexionRef.current = maxFlexion;
-    actualMaxForceNRef.current = maxForceN;
-    setSessionState('FINISHED');
-  }, [timeLeft, targetFlexion, presets.durationMinutes]);
-
   const handlePause = useCallback(() => {
     setSessionState((s) => {
       if (s === 'RUNNING') {
@@ -630,9 +605,9 @@ export function ActiveTherapySession({ isManualMode = false, manualOverrides }: 
   const customExtension = !isManualMode && targetExtension !== presets.extensionDegree;
   const customSpeed = !isManualMode && targetSpeed !== presets.speed;
   const customForceLevel = !isManualMode && presets.forceLevel != null && targetForceLevel !== presets.forceLevel;
-  const canFinishSession = timeLeft <= 0;
 
   const submitSessionResults = useCallback(async () => {
+    if (isManualMode) return; // โหมดฝึกอิสระเป็น ephemeral – ไม่ยิง API เด็ดขาด
     if (painLevel === null) return;
     if (!isManualMode && !activePlanId) {
       setPostResultStatus('error');
@@ -685,7 +660,7 @@ export function ActiveTherapySession({ isManualMode = false, manualOverrides }: 
         [{ text: 'ตกลง' }]
       );
     }
-  }, [painLevel, isCustomSettings, activePlanId, patientId]);
+  }, [painLevel, isCustomSettings, activePlanId, patientId, isManualMode]);
 
   // ─── Loading presets ───────────────────────────────────────────────────
   if (loadingPresets) {
@@ -858,8 +833,8 @@ export function ActiveTherapySession({ isManualMode = false, manualOverrides }: 
     const maxFlex = sessionSummary?.maxFlexion ?? maxFlexionRef.current;
     const maxForce = sessionSummary?.maxForceN ?? actualMaxForceNRef.current;
 
-    // Step 1: Ask for pain level, then submit
-    if (postResultStatus !== 'success') {
+    // Step 1: Ask for pain level, then submit (doctor mode only)
+    if (!isManualMode && postResultStatus !== 'success') {
       return (
         <SafeAreaView style={styles.safeArea} edges={['top']}>
           <ScrollView contentContainerStyle={styles.finishedContainer} showsVerticalScrollIndicator={false}>
@@ -1324,18 +1299,6 @@ export function ActiveTherapySession({ isManualMode = false, manualOverrides }: 
             <Ionicons name="refresh-outline" size={20} color={DSColors.text.secondary} />
             <Text style={[styles.bottomBtnOutlineLabel, { color: DSColors.text.secondary }]}>เริ่มใหม่</Text>
             <Text style={styles.bottomBtnSub}>Reset</Text>
-          </TouchableOpacity>
-
-          {/* Finish session */}
-          <TouchableOpacity
-            activeOpacity={0.75}
-            style={[styles.bottomBtnFinish, (!canFinishSession || sessionActionsLocked) && styles.bottomBtnDisabled]}
-            onPress={handleFinishSession}
-            disabled={sessionActionsLocked || !canFinishSession}
-          >
-            <Ionicons name="checkmark-circle" size={20} color="#FFFFFF" />
-            <Text style={styles.bottomBtnFinishLabel}>เสร็จสิ้นการฝึก</Text>
-            <Text style={[styles.bottomBtnSub, { color: 'rgba(255,255,255,0.75)' }]}>Finish Session</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -2125,24 +2088,6 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '400',
     color: DSColors.text.secondary,
-    textAlign: 'center',
-  },
-  bottomBtnFinish: {
-    flex: 1.5,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 10,
-    borderRadius: DSShape.radiusButton,
-    backgroundColor: DSColors.primary,
-    gap: 2,
-  },
-  bottomBtnDisabled: {
-    opacity: 0.5,
-  },
-  bottomBtnFinishLabel: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#FFFFFF',
     textAlign: 'center',
   },
 });
