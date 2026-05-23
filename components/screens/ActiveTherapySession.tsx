@@ -200,6 +200,11 @@ export function ActiveTherapySession({ isManualMode = false, manualOverrides }: 
   const timeCompletedRef = useRef(0);
   const maxFlexionRef = useRef(presets.flexionDegree);
   const actualMaxForceNRef = useRef(presets.targetForceN);
+  const [sessionSummary, setSessionSummary] = useState<{
+    completed: number;
+    maxFlexion: number;
+    maxForceN: number;
+  } | null>(null);
   const targetFlexionRef = useRef(targetFlexion);
   const targetForceNRef = useRef(targetForceN);
   const targetExtensionRef = useRef(targetExtension);
@@ -321,10 +326,18 @@ export function ActiveTherapySession({ isManualMode = false, manualOverrides }: 
             speed: targetSpeedRef.current,
             durationMinutes: presets.durationMinutes,
           });
+          const completed = durationSeconds;
+          const maxFlexion = targetFlexionRef.current;
+          const maxForceN = targetForceNRef.current;
+          setSessionSummary({
+            completed,
+            maxFlexion,
+            maxForceN,
+          });
           setSessionState('FINISHED');
-          timeCompletedRef.current = durationSeconds;
-          maxFlexionRef.current = targetFlexionRef.current;
-          actualMaxForceNRef.current = targetForceNRef.current;
+          timeCompletedRef.current = completed;
+          maxFlexionRef.current = maxFlexion;
+          actualMaxForceNRef.current = maxForceN;
           return 0;
         }
         return prev - 1;
@@ -410,6 +423,7 @@ export function ActiveTherapySession({ isManualMode = false, manualOverrides }: 
   useEffect(() => { setForceLevelText(String(targetForceLevel)); }, [targetForceLevel]);
 
   const handleStartSession = useCallback(() => {
+    setSessionSummary(null);
     void sendStartCommand({
       angleFlexion: targetFlexion,
       angleExtension: targetExtension,
@@ -444,9 +458,17 @@ export function ActiveTherapySession({ isManualMode = false, manualOverrides }: 
     });
     const durationSeconds = presets.durationMinutes * 60;
     const elapsed = durationSeconds - timeLeft;
-    timeCompletedRef.current = elapsed;
-    maxFlexionRef.current = targetFlexion;
-    actualMaxForceNRef.current = targetForceNRef.current;
+    const completed = Math.max(0, elapsed);
+    const maxFlexion = targetFlexion;
+    const maxForceN = targetForceNRef.current;
+    setSessionSummary({
+      completed,
+      maxFlexion,
+      maxForceN,
+    });
+    timeCompletedRef.current = completed;
+    maxFlexionRef.current = maxFlexion;
+    actualMaxForceNRef.current = maxForceN;
     setSessionState('FINISHED');
   }, [timeLeft, targetFlexion, presets.durationMinutes]);
 
@@ -832,9 +854,9 @@ export function ActiveTherapySession({ isManualMode = false, manualOverrides }: 
 
   // ─── FINISHED: pain level → POST → success ───────────────────────────────
   if (sessionState === 'FINISHED') {
-    const completed = timeCompletedRef.current;
-    const maxFlex = maxFlexionRef.current;
-    const maxForce = actualMaxForceNRef.current;
+    const completed = sessionSummary?.completed ?? timeCompletedRef.current;
+    const maxFlex = sessionSummary?.maxFlexion ?? maxFlexionRef.current;
+    const maxForce = sessionSummary?.maxForceN ?? actualMaxForceNRef.current;
 
     // Step 1: Ask for pain level, then submit
     if (postResultStatus !== 'success') {
@@ -905,6 +927,10 @@ export function ActiveTherapySession({ isManualMode = false, manualOverrides }: 
             <View style={styles.summaryRow}>
               <Text style={styles.summaryLabel}>งอเข่าสูงสุด</Text>
               <Text style={styles.summaryValue}>{maxFlex}°</Text>
+            </View>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryLabel}>แรงสูงสุด</Text>
+              <Text style={styles.summaryValue}>{maxForce} N</Text>
             </View>
           </View>
 

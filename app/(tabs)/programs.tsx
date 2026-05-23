@@ -5,7 +5,8 @@
  */
 
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
 import { ActivityIndicator, Dimensions, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { LineChart } from 'react-native-chart-kit';
 // Chart types from react-native-chart-kit are incompatible with our React typings
@@ -13,8 +14,8 @@ import { LineChart } from 'react-native-chart-kit';
 const AnyLineChart = LineChart as any;
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { getPatientSessions, type SessionResponse } from '@/services/apiClient';
-import { bangkokParts } from '@/utils/dateUtils';
+import { getPatientPreset, getPatientSessions, type SessionResponse } from '@/services/apiClient';
+import { bangkokParts, buildSessionHistoryRange } from '@/utils/dateUtils';
 import {
   DSColors,
   DSLayout,
@@ -357,50 +358,44 @@ export default function HistoryScreen() {
   const [error, setError] = useState<string | null>(null);
   const [selectedPeriod, setSelectedPeriod] = useState<Period>('7d');
 
-  // Fetch sessions from API when component mounts or patientId changes
-  useEffect(() => {
-    async function loadSessions() {
-      // If developer explicitly requests mock data, skip API and use local mock.
-      // if (FORCE_MOCK) {
-      //   setSessions(MOCK_SESSIONS);
-      //   setMissed([]);
-      //   setIsLoading(false);
-      //   return;
-      // }
-
-      if (!auth.patientId) {
-        setError('Patient ID not found');
-        setIsLoading(false);
-        return;
-      }
-      setIsLoading(true);
-      setError(null);
-
-      try {
-        const response = await getPatientSessions(auth.patientId);
-        if (response.success && response.data) {
-          const transformed = transformApiSessions(response.data);
-          setSessions(transformed.sessions);
-          setMissed(transformed.missed);
-        } else {
-          setError(response.error || 'Failed to fetch sessions');
-          // Fall back to mock data if fetch fails
-          // setSessions(MOCK_SESSIONS);
-          // setMissed([]);
-        }
-      } catch (err) {
-        console.error('Error loading sessions:', err);
-        setError('Failed to load session history');
-        // Fall back to mock data
-        // setSessions(MOCK_SESSIONS);
-        // setMissed([]);
-      } finally {
-        setIsLoading(false);
-      }
+  const loadSessions = useCallback(async () => {
+    if (!auth.patientId) {
+      setError('Patient ID not found');
+      setIsLoading(false);
+      return;
     }
+    setIsLoading(true);
+    setError(null);
 
-    loadSessions();
+    try {
+      const presetRes = await getPatientPreset(auth.patientId);
+      const historyRange = buildSessionHistoryRange(
+        presetRes.success ? presetRes.data : null,
+      );
+      const response = await getPatientSessions(auth.patientId, {
+        ...historyRange,
+        limit: 500,
+      });
+      if (response.success && response.data) {
+        const transformed = transformApiSessions(response.data);
+        setSessions(transformed.sessions);
+        setMissed(transformed.missed);
+      } else {
+        setError(response.error || 'Failed to fetch sessions');
+      }
+    } catch (err) {
+      console.error('Error loading sessions:', err);
+      setError('Failed to load session history');
+    } finally {
+      setIsLoading(false);
+    }
   }, [auth.patientId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadSessions();
+    }, [loadSessions]),
+  );
 
   // displaySessions: filtered by period — drives summary stats + session list
   const displaySessions = useMemo(() => {

@@ -42,6 +42,7 @@ import {
 import {
   bangkokKeyFromParts,
   bangkokParts,
+  buildSessionHistoryRange,
   daysInBangkokMonth,
   firstDayWeekdayBangkok,
   toBangkokDateKey,
@@ -88,13 +89,17 @@ const toDateKey = toBangkokDateKey;
 // can't rely on `kind === 'session'` alone — that would silently drop every
 // entry and wipe the calendar/weekly pips. Infer the type from the fields that
 // are present instead.
+function isGhostSession(s: { durationCompleted?: number; actualMaxFlexion?: number }): boolean {
+  return Number(s.durationCompleted ?? 0) === 0 && Number(s.actualMaxFlexion ?? 0) === 0;
+}
+
 function isRealSession(s: any): boolean {
-  if (s?.kind === 'session') return true;
   if (s?.kind === 'missed') return false;
-  // No kind: treat as a real session when it carries result data and isn't MISSED.
+  if (s?.kind === 'session') return !isGhostSession(s);
   const status = String(s?.sessionStatus ?? s?.status ?? '').toUpperCase();
   if (status === 'MISSED') return false;
-  return s?.actualMaxFlexion != null || s?.durationCompleted != null || s?.id != null;
+  if (s?.id == null) return false;
+  return !isGhostSession(s);
 }
 
 function isMissedEntry(s: any): boolean {
@@ -111,41 +116,60 @@ function buildSessionCountsByDate(sessions: SessionResponse[]): Record<string, n
   }, {});
 }
 
-function isSessionSuccess(session: Extract<SessionResponse, { kind: 'session' }>): boolean {
-  // Accept both `sessionStatus` and `status` fields from backend, case-insensitive.
-  const stored = String(session.sessionStatus ?? session.status ?? '').toUpperCase();
+function isSessionSuccess(session: SessionResponse): boolean {
+  const stored = String(
+    (session as { sessionStatus?: string; status?: string }).sessionStatus
+      ?? (session as { status?: string }).status
+      ?? '',
+  ).toUpperCase();
   if (stored === 'SUCCESS') return true;
-  // Fallback: treat as success when actual flexion meets/exceeds the plan target.
-  const achieved = Number(session.actualMaxFlexion);
-  const target = Number(session.plan?.targetFlexion);
+  if (stored === 'FAILED' || stored === 'CONTINUE') return false;
+  const achieved = Number((session as { actualMaxFlexion?: number }).actualMaxFlexion);
+  const target = Number((session as { plan?: { targetFlexion?: number } }).plan?.targetFlexion);
   if (Number.isFinite(achieved) && Number.isFinite(target) && target > 0 && achieved >= target) {
     return true;
   }
-  return false;
+  return achieved > 0;
 }
 
-function buildSessionStatusesByDate(sessions: SessionResponse[]): Record<string, SessionStatus[]> {
+function buildSessionStatusesByDate(
+  sessions: SessionResponse[],
+  sessionsPerDay = SESSIONS_PER_DAY,
+): Record<string, SessionStatus[]> {
   const acc: Record<string, SessionStatus[]> = {};
-  // First pass: real session entries — SUCCESS if criteria met, otherwise MISSED.
-  // Recording every session entry (not just successes) ensures the calendar shows
-  // a dot for days where the user attempted a session, even if it didn't reach target.
-  sessions.forEach((session) => {
-    if (isRealSession(session)) {
-      const key = toDateKey(new Date(session.sessionDate));
-      if (!acc[key]) acc[key] = [];
-      acc[key].push(isSessionSuccess(session as any) ? 'SUCCESS' : 'MISSED');
-    }
+
+  const realSessions = sessions
+    .filter(isRealSession)
+    .sort(
+      (a, b) =>
+        new Date(a.sessionDate).getTime() - new Date(b.sessionDate).getTime(),
+    );
+
+  realSessions.forEach((session) => {
+    const key = toDateKey(new Date(session.sessionDate));
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(isSessionSuccess(session) ? 'SUCCESS' : 'MISSED');
   });
-  // Second pass: synthesize MISSED for days that had no session entries at all.
+
   sessions.forEach((session) => {
-    if (isMissedEntry(session)) {
-      const key = toDateKey(new Date(session.sessionDate));
-      const existing = acc[key];
-      if (!existing || existing.length === 0) {
-        acc[key] = ['MISSED'];
-      }
+    if (!isMissedEntry(session)) return;
+    const key = toDateKey(new Date(session.sessionDate));
+    const expected = session.expectedSessions ?? sessionsPerDay;
+    const completedFromApi = session.completedSessions ?? 0;
+    const existing = acc[key] ?? [];
+
+    if (existing.length > 0) {
+      const merged = [...existing];
+      while (merged.length < expected) merged.push('MISSED');
+      acc[key] = merged.slice(0, expected);
+      return;
     }
+
+    acc[key] = Array.from({ length: expected }, (_, i) =>
+      i < completedFromApi ? 'SUCCESS' : 'MISSED',
+    );
   });
+
   return acc;
 }
 
@@ -562,36 +586,43 @@ export function PatientHomeDashboard() {
     }
 
     let cancelled = false;
-    setPlanState('loading');
+    setPlanState((prev) => (prev === 'loading' ? 'loading' : prev === 'hasPlan' ? 'hasPlan' : prev));
 
-    // Fetch treatment plan, today's stats, and session history in parallel
-    Promise.all([
-      getPatientPreset(patientId),
-      getPatientTodayStats(patientId),
-      getPatientSessions(patientId, { limit: 500 }),
-    ])
-      .then(([presetResponse, statsResponse, sessionsResponse]) => {
+    // Fetch plan + today's stats first; session range follows plan dates.
+    Promise.all([getPatientPreset(patientId), getPatientTodayStats(patientId)])
+      .then(async ([presetResponse, statsResponse]) => {
         if (cancelled) return;
 
-        // History (counts/statuses) is independent of the current preset — keep
-        // showing past sessions even when there's no active prescription.
-        const counts = sessionsResponse.success && sessionsResponse.data
-          ? buildSessionCountsByDate(sessionsResponse.data)
-          : {};
-        const statuses = sessionsResponse.success && sessionsResponse.data
-          ? buildSessionStatusesByDate(sessionsResponse.data)
-          : {};
-        setSessionCountsByDate(counts);
-        setSessionStatusesByDate(statuses);
+        const preset = presetResponse.success ? presetResponse.data : null;
+        const historyRange = buildSessionHistoryRange(preset);
+        const sessionsResponse = await getPatientSessions(patientId, {
+          ...historyRange,
+          limit: 500,
+        });
+        if (cancelled) return;
 
-        // Fallback sessionsPerDay derived from the most recent session entry's plan —
-        // used when the active preset is missing (e.g. last plan COMPLETED).
         const stats = statsResponse.success ? (statsResponse.data as TodayStatsResponse) : null;
-        const sessionsPerDayFromHistory = sessionsResponse.success && sessionsResponse.data
-          ? sessionsResponse.data.find((s) => s.plan?.sessionsPerDay)?.plan?.sessionsPerDay
-          : undefined;
+        const sessionsPerDayFromHistory =
+          sessionsResponse.success && sessionsResponse.data
+            ? sessionsResponse.data.find((s) => s.plan?.sessionsPerDay)?.plan?.sessionsPerDay
+            : undefined;
         const fallbackSessionsPerDay =
-          sessionsPerDayFromHistory ?? stats?.totalSessionsTarget ?? SESSIONS_PER_DAY;
+          preset?.sessionsPerDay
+          ?? sessionsPerDayFromHistory
+          ?? stats?.totalSessionsTarget
+          ?? SESSIONS_PER_DAY;
+
+        let counts: Record<string, number> = {};
+        let statuses: Record<string, SessionStatus[]> = {};
+        if (sessionsResponse.success && sessionsResponse.data) {
+          counts = buildSessionCountsByDate(sessionsResponse.data);
+          statuses = buildSessionStatusesByDate(
+            sessionsResponse.data,
+            fallbackSessionsPerDay,
+          );
+          setSessionCountsByDate(counts);
+          setSessionStatusesByDate(statuses);
+        }
 
         if (!presetResponse.success) {
           setPlanState('noPlan');
@@ -605,8 +636,6 @@ export function PatientHomeDashboard() {
           );
           return;
         }
-
-        const preset = presetResponse.data;
 
         const presetStatus = String(preset?.status ?? '').toUpperCase();
         // Plan date range is compared as Bangkok-day strings (YYYY-MM-DD) to avoid
@@ -642,7 +671,12 @@ export function PatientHomeDashboard() {
           sessionsPerDay,
         };
         setPlanSchedule(schedule);
-        setWeeklyPlan(buildWeeklyPlanFromCounts(counts, statuses, schedule));
+        setWeeklyPlan(
+          buildWeeklyPlanFromCounts(counts, statuses, {
+            ...schedule,
+            sessionsPerDay,
+          }),
+        );
 
         if (!todayIsScheduled) {
           // Plan exists but today isn't in the schedule — treat like noPlan for the hero card.
@@ -657,7 +691,10 @@ export function PatientHomeDashboard() {
         const todayKey = todayBangkokKey();
         const todaySessionsFromList = sessionsResponse.success && sessionsResponse.data
           ? sessionsResponse.data.filter(
-              (s) => isRealSession(s) && toBangkokDateKey(s.sessionDate) === todayKey,
+              (s) =>
+                isRealSession(s)
+                && isSessionSuccess(s)
+                && toBangkokDateKey(s.sessionDate) === todayKey,
             ).length
           : 0;
         const todaySessionsPerDay =

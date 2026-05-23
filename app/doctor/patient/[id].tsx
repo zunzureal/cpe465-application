@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { View, TextInput, Switch, StyleSheet, Pressable, Text, TouchableOpacity, useWindowDimensions, Modal, ScrollView, Platform, Dimensions, Alert, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,7 +9,7 @@ import { useLocalSearchParams } from 'expo-router';
 import { DSColors, DSLayout, DSShape, DSShadowSoft, DSTypography } from '@/constants/design-system';
 import { useAuth } from '@/contexts/AuthContext';
 import { putPatientPreset, getDoctorPatient, getPatientPreset, getPatientSessions, deactivatePlan, type SessionResponse } from '@/services/apiClient';
-import { bangkokParts, toBangkokDateKey } from '@/utils/dateUtils';
+import { bangkokParts, buildSessionHistoryRange, toBangkokDateKey } from '@/utils/dateUtils';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import {
@@ -307,26 +308,44 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
     fetchPatient();
   }, [authToken, patientId]);
 
-  useEffect(() => {
-    async function fetchPresetAndSessions() {
-      if (Number.isNaN(patientId)) return;
-      const presetRes = await getPatientPreset(patientId);
-      if (presetRes.success && presetRes.data) {
-        const p = presetRes.data as Record<string, unknown>;
-        setExistingPlan(p);
-        applyPlanForm(planFormFromPreset(p));
-      } else {
-        setExistingPlan(null);
-        applyPlanForm(getDefaultPlanForm());
-      }
-
-      const sessRes = await getPatientSessions(patientId, { limit: 20 });
-      if (sessRes.success && Array.isArray(sessRes.data)) {
-        setSessions(sessRes.data);
-      }
+  const reloadPresetAndSessions = useCallback(async () => {
+    if (Number.isNaN(patientId)) return;
+    const presetRes = await getPatientPreset(patientId);
+    if (presetRes.success && presetRes.data) {
+      const p = presetRes.data as Record<string, unknown>;
+      setExistingPlan(p);
+      applyPlanForm(planFormFromPreset(p));
+    } else {
+      setExistingPlan(null);
+      applyPlanForm(getDefaultPlanForm());
     }
-    fetchPresetAndSessions();
+
+    const historyRange = buildSessionHistoryRange(
+      presetRes.success ? presetRes.data : null,
+    );
+    const sessRes = await getPatientSessions(patientId, { ...historyRange, limit: 500 });
+    if (sessRes.success && Array.isArray(sessRes.data)) {
+      setSessions(sessRes.data);
+    }
   }, [patientId]);
+
+  /** Re-fetch while this screen stays open (e.g. doctor watches patient finish a session). */
+  const SESSION_POLL_MS = 15_000;
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      const refresh = () => {
+        if (active) reloadPresetAndSessions();
+      };
+      refresh();
+      const timer = setInterval(refresh, SESSION_POLL_MS);
+      return () => {
+        active = false;
+        clearInterval(timer);
+      };
+    }, [reloadPresetAndSessions]),
+  );
 
   async function handleSave() {
     if (!authToken) {
@@ -452,11 +471,12 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
         return;
       }
 
-      // Refresh sessions after saving preset
-      const sessRes = await getPatientSessions(patientId, { limit: 20 });
-      if (sessRes.success && Array.isArray(sessRes.data)) setSessions(sessRes.data as any[]);
-
       const saved = (res.data ?? {}) as Record<string, unknown>;
+
+      // Refresh sessions after saving preset
+      const historyRange = buildSessionHistoryRange(saved);
+      const sessRes = await getPatientSessions(patientId, { ...historyRange, limit: 500 });
+      if (sessRes.success && Array.isArray(sessRes.data)) setSessions(sessRes.data as any[]);
       setExistingPlan(saved);
       applyPlanForm(planFormFromPreset(saved));
       setPlanError(null);

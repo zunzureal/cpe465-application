@@ -32,6 +32,49 @@ export function todayBangkokKey(): string {
   return toBangkokDateKey(new Date());
 }
 
+/** Shift a Bangkok date key by N calendar days. */
+export function addDaysToBangkokKey(key: string, deltaDays: number): string {
+  const base = key || todayBangkokKey();
+  const instant = new Date(`${base}T12:00:00+07:00`);
+  if (Number.isNaN(instant.getTime())) return todayBangkokKey();
+  instant.setUTCDate(instant.getUTCDate() + deltaDays);
+  return toBangkokDateKey(instant);
+}
+
+/** ISO bounds for API queries (inclusive calendar days in Bangkok). */
+export function bangkokDayRangeIso(fromKey: string, toKey: string): {
+  fromDate: string;
+  toDate: string;
+} {
+  return {
+    fromDate: `${fromKey}T00:00:00+07:00`,
+    toDate: `${toKey}T23:59:59.999+07:00`,
+  };
+}
+
+/** Session history window for calendar/history (Bangkok days). */
+export function buildSessionHistoryRange(preset?: {
+  startDate?: string | null;
+  endDate?: string | null;
+} | null) {
+  const today = todayBangkokKey();
+  let fromKey = addDaysToBangkokKey(today, -365);
+  // Always include through today (+ buffer) so sessions logged after the plan's
+  // endDate still appear in doctor/patient history and calendars.
+  let toKey = addDaysToBangkokKey(today, 31);
+  if (preset?.startDate) {
+    const k = toBangkokDateKey(preset.startDate);
+    if (k) fromKey = k;
+  }
+  if (preset?.endDate) {
+    const planEnd = toBangkokDateKey(preset.endDate);
+    if (planEnd && planEnd > toKey) toKey = planEnd;
+  }
+  if (toKey < today) toKey = today;
+  if (fromKey > toKey) toKey = fromKey;
+  return bangkokDayRangeIso(fromKey, toKey);
+}
+
 /**
  * Calendar parts ({ year, month0, day, weekday }) of a Date as observed in Bangkok.
  * `month0` is 0-indexed to match JS Date conventions. `weekday` is 0=Sun..6=Sat.

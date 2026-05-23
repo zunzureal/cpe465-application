@@ -5,6 +5,7 @@
  */
 
 import { useEffect, useState, useCallback } from 'react';
+import { useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import {
   ActivityIndicator,
@@ -302,9 +303,11 @@ export function DoctorOverviewDashboard() {
     }
   }
 
-  useEffect(() => {
-    fetchPatients();
-  }, [authToken]);
+  useFocusEffect(
+    useCallback(() => {
+      if (authToken) fetchPatients();
+    }, [authToken]),
+  );
 
   async function handleAddPatient() {
     if (!authToken) return;
