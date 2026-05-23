@@ -66,9 +66,9 @@ async function apiCall<T>(
 
   try {
     const fullUrl = `${API_BASE}${endpoint}`;
-    console.error('[apiCall] fetch', method, fullUrl);
+    console.debug('[apiCall] fetch', method, fullUrl);
     // Debug: log headers (includes Authorization when authToken provided)
-    console.error('[apiCall] headers', defaultHeaders);
+    console.debug('[apiCall] headers', defaultHeaders);
     const response = await fetch(fullUrl, {
       method,
       headers: { ...defaultHeaders, ...headers },
@@ -419,7 +419,7 @@ export async function getPatientPreset(
     if (parsed && parsed.plan === null) {
       return { success: true, data: null };
     }
-    return { success: true, data: parsed as TreatmentPlanResponse };
+    return { success: true, data: parsed as unknown as TreatmentPlanResponse };
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Network error';
     return { success: false, error: message };
@@ -459,6 +459,7 @@ export interface PlanSummary {
   targetFlexion: number;
   targetExtension?: number;
   durationMinutes?: number;
+  targetForceN?: number | null;
   status?: string;
   createdAt?: string;
   startDate?: string;

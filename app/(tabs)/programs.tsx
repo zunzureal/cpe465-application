@@ -157,6 +157,7 @@ function transformApiSessions(apiSessions: SessionResponse[]): {
       isNaN(rawPain) || rawPain <= 1 ? 1 : rawPain >= 3 ? 3 : 2;
 
     const sessionStatus = resolveSessionStatus(apiSession);
+    const sessionsPerDay = apiSession.plan?.sessionsPerDay ?? SESSIONS_PER_DAY;
 
     const record: SessionRecord = {
       id: String(apiSession.id),
@@ -164,7 +165,7 @@ function transformApiSessions(apiSessions: SessionResponse[]): {
       time: timeStr,
       ts: sessionDate.getTime(),
       sessionNum: 1,
-      sessionsPerDay: 3,
+      sessionsPerDay,
       achievedFlexion: apiSession.actualMaxFlexion || 0,
       targetFlexion: apiSession.plan?.targetFlexion || 0,
       painLevel: normalizedPain,
@@ -184,9 +185,13 @@ function transformApiSessions(apiSessions: SessionResponse[]): {
   dayMap.forEach((sessions) => {
     // sort by timestamp ascending so session 1 is earliest
     sessions.sort((a, b) => a.ts - b.ts);
+    const expectedSessionsPerDay = Math.max(
+      ...sessions.map((session) => session.sessionsPerDay || SESSIONS_PER_DAY),
+      SESSIONS_PER_DAY,
+    );
     sessions.forEach((session, index) => {
       session.sessionNum = index + 1;
-      session.sessionsPerDay = sessions.length;
+      session.sessionsPerDay = expectedSessionsPerDay;
       result.push(session);
     });
   });

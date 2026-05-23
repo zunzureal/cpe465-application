@@ -37,6 +37,7 @@ import {
   getPatientSessions,
   getPatientTodayStats,
   type SessionResponse,
+  type MissedEntry,
   type TodayStatsResponse,
 } from '@/services/apiClient';
 import {
@@ -153,9 +154,10 @@ function buildSessionStatusesByDate(
 
   sessions.forEach((session) => {
     if (!isMissedEntry(session)) return;
+    const missedSession = session as MissedEntry;
     const key = toDateKey(new Date(session.sessionDate));
-    const expected = session.expectedSessions ?? sessionsPerDay;
-    const completedFromApi = session.completedSessions ?? 0;
+    const expected = missedSession.expectedSessions ?? sessionsPerDay;
+    const completedFromApi = missedSession.completedSessions ?? 0;
     const existing = acc[key] ?? [];
 
     if (existing.length > 0) {
@@ -601,13 +603,20 @@ export function PatientHomeDashboard() {
         });
         if (cancelled) return;
 
+        const sessionData = sessionsResponse.success && sessionsResponse.data ? sessionsResponse.data : [];
+
+        const latestSessionPlan = sessionsResponse.success && sessionsResponse.data
+          ? sessionData.find((session) => session.plan)?.plan ?? null
+          : null;
+
         const stats = statsResponse.success ? (statsResponse.data as TodayStatsResponse) : null;
         const sessionsPerDayFromHistory =
-          sessionsResponse.success && sessionsResponse.data
-            ? sessionsResponse.data.find((s) => s.plan?.sessionsPerDay)?.plan?.sessionsPerDay
+          sessionData.length > 0
+            ? sessionData.find((s) => s.plan?.sessionsPerDay)?.plan?.sessionsPerDay
             : undefined;
         const fallbackSessionsPerDay =
           preset?.sessionsPerDay
+          ?? latestSessionPlan?.sessionsPerDay
           ?? sessionsPerDayFromHistory
           ?? stats?.totalSessionsTarget
           ?? SESSIONS_PER_DAY;
@@ -624,14 +633,49 @@ export function PatientHomeDashboard() {
           setSessionStatusesByDate(statuses);
         }
 
-        if (!presetResponse.success) {
-          setPlanState('noPlan');
-          setTodayPlan(null);
-          setPlanSchedule({ active: false, sessionsPerDay: fallbackSessionsPerDay });
+        if (!preset) {
+          if (!latestSessionPlan) {
+            setPlanState('noPlan');
+            setTodayPlan(null);
+            setPlanSchedule({ active: false, sessionsPerDay: fallbackSessionsPerDay });
+            setWeeklyPlan(
+              buildWeeklyPlanFromCounts(counts, statuses, {
+                active: false,
+                sessionsPerDay: fallbackSessionsPerDay,
+              }),
+            );
+            return;
+          }
+
+          const latestPlanSessionsPerDay = latestSessionPlan.sessionsPerDay ?? fallbackSessionsPerDay;
+          const latestTodaySessionsCompleted = sessionData.length > 0
+            ? sessionData.filter(
+                (s) =>
+                  isRealSession(s)
+                  && isSessionSuccess(s)
+                  && toBangkokDateKey(s.sessionDate) === todayBangkokKey(),
+              ).length
+            : 0;
+
+          setPlanState('hasPlan');
+          setTodayPlan({
+            targetFlexion: Number(latestSessionPlan.targetFlexion ?? 90),
+            durationMinutes: Number(latestSessionPlan.durationMinutes ?? 15),
+            targetForceN: typeof latestSessionPlan.targetForceN === 'number' ? latestSessionPlan.targetForceN : 10,
+            sessionsPerDay: latestPlanSessionsPerDay,
+            sessionsCompletedToday: latestTodaySessionsCompleted,
+          });
+          setPlanSchedule({
+            active: true,
+            sessionsPerDay: latestPlanSessionsPerDay,
+            startDateKey: latestSessionPlan.startDate ? toBangkokDateKey(latestSessionPlan.startDate) : undefined,
+            endDateKey: latestSessionPlan.endDate ? toBangkokDateKey(latestSessionPlan.endDate) : undefined,
+            daysOfWeek: latestSessionPlan.daysOfWeek,
+          });
           setWeeklyPlan(
             buildWeeklyPlanFromCounts(counts, statuses, {
-              active: false,
-              sessionsPerDay: fallbackSessionsPerDay,
+              active: true,
+              sessionsPerDay: latestPlanSessionsPerDay,
             }),
           );
           return;
