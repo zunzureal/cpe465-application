@@ -150,17 +150,11 @@ function transformApiSessions(apiSessions: SessionResponse[]): {
       timeZone: 'Asia/Bangkok',
     });
 
-    // Normalize painLevel coming from session_logs. Backend may store a broader range
-    // (e.g., 0, 3, 5, 8). Map them into our UI buckets: 1 (no pain), 2 (moderate), 3 (severe).
-    const rawPain = Number(apiSession.painLevel ?? 1);
-    let normalizedPain: 1 | 2 | 3 = 1;
-    if (isNaN(rawPain) || rawPain <= 1) {
-      normalizedPain = 1;
-    } else if (rawPain <= 4) {
-      normalizedPain = 2;
-    } else {
-      normalizedPain = 3;
-    }
+    // painLevel จาก backend ใช้สเกลเดียวกับ UI (1=ไม่เจ็บ, 2=ปานกลาง, 3=เจ็บมาก)
+    // clamp กันค่าเพี้ยน/null ไว้ที่ช่วง 1–3
+    const rawPain = Math.round(Number(apiSession.painLevel ?? 1));
+    const normalizedPain: 1 | 2 | 3 =
+      isNaN(rawPain) || rawPain <= 1 ? 1 : rawPain >= 3 ? 3 : 2;
 
     const sessionStatus = resolveSessionStatus(apiSession);
 
