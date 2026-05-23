@@ -526,19 +526,44 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
     onConfirm: (range: { startDate: string; endDate: string }) => void;
   }) {
     const defaultStyles = useDefaultStyles('light');
-    const [rangeStart, setRangeStart] = useState<DateType>(startDate || undefined);
-    const [rangeEnd, setRangeEnd] = useState<DateType>(endDate || undefined);
+    function toPickerDate(value?: string | DateType): DateType {
+      if (!value) return undefined;
+      if (value instanceof Date) {
+        const copy = new Date(value.getTime());
+        copy.setHours(12, 0, 0, 0);
+        return copy;
+      }
+      if (typeof value === 'string') {
+        const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (match) {
+          const year = Number(match[1]);
+          const month = Number(match[2]) - 1;
+          const day = Number(match[3]);
+          return new Date(year, month, day, 12, 0, 0, 0);
+        }
+      }
+      const parsed = new Date(value as any);
+      if (Number.isNaN(parsed.getTime())) return undefined;
+      parsed.setHours(12, 0, 0, 0);
+      return parsed;
+    }
+
+    const [rangeStart, setRangeStart] = useState<DateType>(toPickerDate(startDate));
+    const [rangeEnd, setRangeEnd] = useState<DateType>(toPickerDate(endDate));
 
     useEffect(() => {
       if (!visible) return;
-      setRangeStart(startDate || undefined);
-      setRangeEnd(endDate || undefined);
+      setRangeStart(toPickerDate(startDate));
+      setRangeEnd(toPickerDate(endDate));
     }, [visible, startDate, endDate]);
 
     function toIso(value: DateType) {
       if (!value) return '';
       // If the picker already provided a YYYY-MM-DD string, return it directly
-      if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+      if (typeof value === 'string') {
+        const match = value.match(/^(\d{4}-\d{2}-\d{2})/);
+        if (match) return match[1];
+      }
       // Some picker implementations return a wrapper object (looks like { $d: Date }) — prefer that
       let dObj: Date | null = null;
       try {
@@ -553,11 +578,7 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
         dObj = new Date(value as any);
       }
       if (!dObj || Number.isNaN(dObj.getTime())) return '';
-      // Use local date parts so the displayed day matches what the user tapped
-      const y = dObj.getFullYear();
-      const m = String(dObj.getMonth() + 1).padStart(2, '0');
-      const day = String(dObj.getDate()).padStart(2, '0');
-      return `${y}-${m}-${day}`;
+      return toBangkokDateKey(dObj);
     }
 
     return (
@@ -574,11 +595,11 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
             <DateTimePicker
               mode="range"
               calendar="gregory"
-              startDate={rangeStart as DateType}
-              endDate={rangeEnd as DateType}
+              startDate={rangeStart}
+              endDate={rangeEnd}
               minDate={(() => {
                 const d = new Date();
-                d.setHours(0, 0, 0, 0);
+                d.setHours(12, 0, 0, 0);
                 return d;
               })()}
               showOutsideDays
@@ -589,8 +610,8 @@ export default function ManagePatientScreen({ patientIdProp, embedded = false, o
                   console.log('DatePicker onChange raw:', { nextStartDate, nextEndDate, startType: typeof nextStartDate, endType: typeof nextEndDate });
                 } catch (err) {}
 
-                setRangeStart(nextStartDate || undefined);
-                setRangeEnd(nextEndDate || undefined);
+                setRangeStart(toPickerDate(nextStartDate));
+                setRangeEnd(toPickerDate(nextEndDate));
 
                 if (nextStartDate && nextEndDate) {
                   const s = toIso(nextStartDate);

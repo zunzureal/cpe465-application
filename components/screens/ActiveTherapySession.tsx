@@ -662,6 +662,10 @@ export function ActiveTherapySession({ isManualMode = false, manualOverrides }: 
     }
   }, [painLevel, isCustomSettings, activePlanId, patientId, isManualMode]);
 
+  const handleReturnHome = useCallback(() => {
+    router.replace('/(tabs)');
+  }, [router]);
+
   // ─── Loading presets ───────────────────────────────────────────────────
   if (loadingPresets) {
     return (
@@ -909,7 +913,7 @@ export function ActiveTherapySession({ isManualMode = false, manualOverrides }: 
             </View>
           </View>
 
-          <TouchableOpacity activeOpacity={0.7} style={styles.backButton} onPress={() => router.back()}>
+          <TouchableOpacity activeOpacity={0.7} style={styles.backButton} onPress={handleReturnHome}>
             <Text style={styles.buttonLabel}>กลับหน้าหลัก (Back to Home)</Text>
           </TouchableOpacity>
         </View>
